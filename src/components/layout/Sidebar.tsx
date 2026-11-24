@@ -100,7 +100,33 @@ export function Sidebar({
                         <X className="w-5 h-5" />
                     </Button>
                 )}
+                {!isMobile && !collapsed && (
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => onCollapsedChange(true)}
+                        aria-label="Collapse sidebar"
+                        className="h-7 w-7 text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                    </Button>
+                )}
             </div>
+
+            {/* Expand toggle — only visible when collapsed (desktop) */}
+            {!isMobile && collapsed && (
+                <div className="flex justify-center border-b border-sidebar-border py-1.5">
+                    <Button
+                        variant="ghost"
+                        size="icon-sm"
+                        onClick={() => onCollapsedChange(false)}
+                        aria-label="Expand sidebar"
+                        className="h-7 w-7 text-sidebar-muted hover:text-sidebar-foreground hover:bg-sidebar-accent"
+                    >
+                        <ChevronRight className="w-4 h-4" />
+                    </Button>
+                </div>
+            )}
 
             {/* Main Navigation */}
             <nav className="flex-1 overflow-y-auto py-4 px-3">
@@ -200,28 +226,6 @@ export function Sidebar({
                         );
                     })}
                 </ul>
-
-                {/* Collapse Button - Only show on desktop */}
-                {!isMobile && (
-                    <div className="mt-4">
-                        <Button
-                            variant="ghost"
-                            size={collapsed ? "icon-sm" : "sm"}
-                            onClick={() => onCollapsedChange(!collapsed)}
-                            className="w-full justify-center text-sidebar-muted hover:text-sidebar-foreground"
-                            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                        >
-                            {collapsed ? (
-                                <ChevronRight className="w-4 h-4" />
-                            ) : (
-                                <>
-                                    <ChevronLeft className="w-4 h-4" />
-                                    <span>Collapse</span>
-                                </>
-                            )}
-                        </Button>
-                    </div>
-                )}
             </div>
         </>
     );

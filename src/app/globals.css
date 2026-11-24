@@ -307,6 +307,97 @@
   @apply absolute -top-10 left-4 z-50 bg-primary text-primary-foreground px-4 py-2 rounded-md transition-all duration-200 focus:top-4;
 }
 
+/* Tiptap editor links — visually distinct + Ctrl+Click affordance */
+.tiptap a.sd-editor-link,
+.email-preview-body a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+  cursor: text; /* default cursor — regular click stays in editor */
+}
+
+.tiptap a.sd-editor-link:hover {
+  text-decoration-thickness: 2px;
+  cursor: pointer; /* hint that Ctrl+Click navigates */
+}
+
+/* Tiptap editor images — never overflow their container, click to select */
+.tiptap img,
+.email-preview-body img {
+  max-width: 100%;
+  height: auto;
+  display: inline-block;
+  vertical-align: middle;
+}
+.tiptap img.ProseMirror-selectednode {
+  outline: 2px solid hsl(var(--primary));
+  outline-offset: 2px;
+}
+
+/* Tiptap editor tables — visible borders + zebra so cells are obvious */
+.tiptap table.sd-editor-table,
+.email-preview-body table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  table-layout: fixed;
+  width: 100%;
+  overflow: hidden;
+}
+
+.tiptap table.sd-editor-table td,
+.tiptap table.sd-editor-table th,
+.email-preview-body table td,
+.email-preview-body table th {
+  border: 1px solid hsl(var(--border));
+  padding: 8px 12px;
+  vertical-align: top;
+  min-width: 1em;
+  position: relative;
+}
+
+.tiptap table.sd-editor-table th {
+  background: hsl(var(--muted));
+  font-weight: 600;
+}
+
+.tiptap table.sd-editor-table .selectedCell::after {
+  background: hsl(var(--primary) / 0.18);
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.tiptap table.sd-editor-table .column-resize-handle {
+  background: hsl(var(--primary));
+  bottom: -2px;
+  position: absolute;
+  right: -2px;
+  pointer-events: none;
+  top: 0;
+  width: 3px;
+}
+
+/* Placeholder chip — highlights [Variable Name] tokens inside the editor and preview */
+.sd-placeholder-chip {
+  background: hsl(var(--primary) / 0.10);
+  color: hsl(var(--primary));
+  padding: 0.05em 0.4em;
+  border-radius: 4px;
+  font-size: 0.92em;
+  font-weight: 500;
+  border: 1px solid hsl(var(--primary) / 0.18);
+  white-space: nowrap;
+}
+
+.dark .sd-placeholder-chip {
+  background: hsl(var(--primary) / 0.18);
+  color: hsl(var(--primary));
+  border-color: hsl(var(--primary) / 0.30);
+}
+
 /* Custom scrollbar */
 ::-webkit-scrollbar {
   width: 8px;

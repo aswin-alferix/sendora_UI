@@ -2,6 +2,7 @@
 
 import { ReactNode } from "react";
 import { motion } from "framer-motion";
+import { TopBarActions } from "@/components/layout/TopBarActions";
 
 interface PageHeaderProps {
     title: string;
@@ -23,7 +24,10 @@ export function PageHeader({ title, description, action }: PageHeaderProps) {
                     <p className="text-body-sm md:text-body-base text-muted-foreground mt-1">{description}</p>
                 )}
             </div>
-            {action && <div className="shrink-0">{action}</div>}
+            <div className="flex items-center gap-3 shrink-0">
+                {action}
+                <TopBarActions />
+            </div>
         </motion.header>
     );
 }

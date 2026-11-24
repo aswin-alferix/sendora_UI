@@ -3,11 +3,16 @@
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Menu } from "lucide-react";
+import { usePathname } from "next/navigation";
 import { Sidebar } from "./Sidebar";
+import { TopBarActions } from "./TopBarActions";
 import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/useMediaQuery";
 
+const AUTH_ROUTES = ["/login"];
+
 export function AppLayout({ children }: { children: React.ReactNode }) {
+    const pathname = usePathname();
     const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
     const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
     const isMobile = useIsMobile();
@@ -18,6 +23,13 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
             setMobileMenuOpen(false);
         }
     }, [isMobile]);
+
+    // Auth pages (login) render full-bleed without the sidebar/topbar chrome.
+    // Must come AFTER all hooks to satisfy the Rules of Hooks.
+    const isAuthRoute = AUTH_ROUTES.some((p) => pathname?.startsWith(p));
+    if (isAuthRoute) {
+        return <>{children}</>;
+    }
 
     // Calculate margin for main content
     const getMainMargin = () => {
@@ -32,21 +44,21 @@ export function AppLayout({ children }: { children: React.ReactNode }) {
                 Skip to main content
             </a>
 
-            {/* Mobile Header */}
+            {/* Mobile-only top header — hosts menu trigger + actions pill (desktop pages render the pill in their own PageHeader) */}
             {isMobile && (
-                <header className="fixed top-0 left-0 right-0 z-30 h-14 bg-sidebar border-b border-sidebar-border flex items-center px-4">
-                    <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => setMobileMenuOpen(true)}
-                        aria-label="Open menu"
-                        className="text-sidebar-foreground"
-                    >
-                        <Menu className="w-5 h-5" />
-                    </Button>
-                    <span className="ml-3 text-lg font-heading font-bold text-sidebar-foreground">
-                        Sendora
-                    </span>
+                <header className="fixed top-0 left-0 right-0 z-30 h-14 bg-background/85 backdrop-blur-md border-b border-border flex items-center justify-between px-4">
+                    <div className="flex items-center gap-2">
+                        <Button
+                            variant="ghost"
+                            size="icon"
+                            onClick={() => setMobileMenuOpen(true)}
+                            aria-label="Open menu"
+                        >
+                            <Menu className="w-5 h-5" />
+                        </Button>
+                        <span className="text-base font-heading font-bold tracking-tight">Sendora</span>
+                    </div>
+                    <TopBarActions />
                 </header>
             )}
 

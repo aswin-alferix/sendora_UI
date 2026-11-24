@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Search, Filter, Download } from "lucide-react";
+import { Search, Filter, Download, ChevronLeft, ChevronRight } from "lucide-react";
+import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { EmailRow } from "@/components/shared/EmailRow";
 import { Button } from "@/components/ui/button";
@@ -14,72 +15,65 @@ import {
     SelectTrigger,
     SelectValue,
 } from "@/components/ui/select";
+import { usePagination } from "@/hooks/usePagination";
+import { useToast } from "@/hooks/use-toast";
 
-// Mock data for sent emails
-const sentEmails = [
-    {
-        id: "1",
-        to: "john.doe@company.com",
-        subject: "Weekly Report - Q4 Updates",
-        status: "sent" as const,
-        date: "Today, 2:30 PM",
-    },
-    {
-        id: "2",
-        to: "marketing@startup.io",
-        subject: "Partnership Proposal",
-        status: "sent" as const,
-        date: "Today, 1:15 PM",
-    },
-    {
-        id: "3",
-        to: "team@agency.co",
-        subject: "Project Kickoff Meeting",
-        status: "pending" as const,
-        date: "Today, 11:00 AM",
-    },
-    {
-        id: "4",
-        to: "support@vendor.net",
-        subject: "Invoice #12345 - Payment Confirmation",
-        status: "failed" as const,
-        date: "Yesterday, 4:45 PM",
-    },
-    {
-        id: "5",
-        to: "hr@enterprise.com",
-        subject: "New Hire Onboarding Documents",
-        status: "sent" as const,
-        date: "Yesterday, 2:30 PM",
-    },
-    {
-        id: "6",
-        to: "sales@business.org",
-        subject: "Quarterly Sales Forecast",
-        status: "sent" as const,
-        date: "Jan 10, 2025",
-    },
-    {
-        id: "7",
-        to: "ceo@startup.io",
-        subject: "Board Meeting Summary",
-        status: "sent" as const,
-        date: "Jan 9, 2025",
-    },
-    {
-        id: "8",
-        to: "dev@techcorp.com",
-        subject: "API Integration Docs",
-        status: "sent" as const,
-        date: "Jan 8, 2025",
-    },
-];
+interface SentEmail {
+    id: string;
+    to: string;
+    subject: string;
+    status: "sent" | "pending" | "failed";
+    date: string;
+}
+
+const PAGE_SIZE = 10;
+
+function relativeDate(iso: string): string {
+    const d = new Date(iso);
+    const now = new Date();
+    const sameDay = d.toDateString() === now.toDateString();
+    const yesterday = new Date(now);
+    yesterday.setDate(now.getDate() - 1);
+    const isYesterday = d.toDateString() === yesterday.toDateString();
+    const time = d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+    if (sameDay) return `Today, ${time}`;
+    if (isYesterday) return `Yesterday, ${time}`;
+    return d.toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" });
+}
 
 export default function SentPage() {
+    const router = useRouter();
+    const { toast } = useToast();
     const [searchQuery, setSearchQuery] = useState("");
     const [statusFilter, setStatusFilter] = useState<string>("all");
+    const [emails, setEmails] = useState<SentEmail[]>([]);
+    const [loading, setLoading] = useState(true);
 
-    const filteredEmails = sentEmails.filter((email) => {
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/emails");
+                const data = await res.json();
+                if (cancelled) return;
+                const items: SentEmail[] = (data.items ?? []).map((e: { id: string; to: string[]; subject: string; status: string; createdAt: string; sentAt?: string; scheduledAt?: string }) => ({
+                    id: e.id,
+                    to: e.to.join(", "),
+                    subject: e.subject,
+                    status: e.status === "scheduled" ? "pending" : (e.status as "sent" | "failed"),
+                    date: relativeDate(e.sentAt ?? e.scheduledAt ?? e.createdAt),
+                }));
+                setEmails(items);
+            } catch (err) {
+                console.error("Failed to load emails", err);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
+
+    const filteredEmails = emails.filter((email) => {
         const matchesSearch =
             email.to.toLowerCase().includes(searchQuery.toLowerCase()) ||
             email.subject.toLowerCase().includes(searchQuery.toLowerCase());
@@ -87,20 +81,52 @@ export default function SentPage() {
         return matchesSearch && matchesStatus;
     });
 
+    const { page, totalPages, paginatedItems, goNext, goPrev, hasNext, hasPrev, from, to, total, reset } =
+        usePagination(filteredEmails, PAGE_SIZE);
+
+    useEffect(() => { reset(); }, [searchQuery, statusFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
+    const handleView = (id: string) => {
+        router.push(`/sent/${id}`);
+    };
+
+    const handleResend = (id: string) => {
+        const email = emails.find((e) => e.id === id);
+        if (!email) return;
+        router.push(`/compose?to=${encodeURIComponent(email.to)}`);
+        toast({ title: "Compose opened", description: `Pre-filled to ${email.to}` });
+    };
+
+    const handleExport = () => {
+        const csv = [
+            ["ID", "To", "Subject", "Status", "Date"],
+            ...filteredEmails.map((e) => [e.id, e.to, e.subject, e.status, e.date]),
+        ]
+            .map((row) => row.map((cell) => `"${cell}"`).join(","))
+            .join("\n");
+
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "sent-emails.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div className="p-4 md:p-8 max-w-7xl mx-auto">
             <PageHeader
                 title="Sent Emails"
                 description="View and manage all your sent emails"
                 action={
-                    <Button variant="outline">
+                    <Button variant="outline" onClick={handleExport}>
                         <Download className="w-4 h-4" />
-                        Export
+                        Export CSV
                     </Button>
                 }
             />
 
-            {/* Filters */}
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -129,20 +155,19 @@ export default function SentPage() {
                 </Select>
             </motion.div>
 
-            {/* Email List */}
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ delay: 0.1 }}
                 className="bg-card rounded-xl border border-border shadow-card"
             >
-                {filteredEmails.length > 0 ? (
-                    filteredEmails.map((email) => (
+                {paginatedItems.length > 0 ? (
+                    paginatedItems.map((email) => (
                         <EmailRow
                             key={email.id}
                             {...email}
-                            onView={(id) => console.log("View:", id)}
-                            onResend={(id) => console.log("Resend:", id)}
+                            onView={handleView}
+                            onResend={handleResend}
                         />
                     ))
                 ) : (
@@ -152,10 +177,23 @@ export default function SentPage() {
                 )}
             </motion.div>
 
-            {/* Pagination info */}
-            <div className="flex items-center justify-between mt-4 text-sm text-muted-foreground">
-                <p>Showing {filteredEmails.length} of {sentEmails.length} emails</p>
-            </div>
+            {/* Pagination */}
+            {total > 0 && (
+                <div className="flex items-center justify-between mt-4 text-sm text-muted-foreground">
+                    <p>Showing {from}–{to} of {total} emails</p>
+                    {totalPages > 1 && (
+                        <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" onClick={goPrev} disabled={!hasPrev}>
+                                <ChevronLeft className="h-4 w-4" />
+                            </Button>
+                            <span className="px-2">Page {page} of {totalPages}</span>
+                            <Button variant="outline" size="sm" onClick={goNext} disabled={!hasNext}>
+                                <ChevronRight className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

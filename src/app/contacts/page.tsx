@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check } from "lucide-react";
+import { Plus, Search, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, ChevronLeft, ChevronRight, X, SlidersHorizontal, Settings2, FilterX } from "lucide-react";
 
-import { PageHeader } from "@/components/shared/PageHeader";
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +20,7 @@ import {
     DropdownMenu,
     DropdownMenuContent,
     DropdownMenuItem,
+    DropdownMenuSeparator,
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -57,7 +57,10 @@ import {
 import { ContactDialog } from "@/components/contacts/ContactDialog";
 import { RolesManagementDialog } from "@/components/contacts/RolesManagementDialog";
 import { BulkGroupsManagementDialog } from "@/components/contacts/BulkGroupsManagementDialog";
+import { ContactDetailDrawer } from "@/components/contacts/ContactDetailDrawer";
+import { TopBarActions } from "@/components/layout/TopBarActions";
 import { useToast } from "@/hooks/use-toast";
+import { usePagination } from "@/hooks/usePagination";
 
 interface ContactRole {
     id: string;
@@ -87,34 +90,21 @@ const defaultRoles: ContactRole[] = [
     { id: "4", name: "Consultant", isDefault: true },
 ];
 
-const defaultBulkGroups: BulkGroup[] = [
-    { id: "1", name: "Newsletter" },
-    { id: "2", name: "Marketing" },
-];
+const defaultBulkGroups: BulkGroup[] = [];
 
-const mockContacts: Contact[] = [
-    { id: "1", name: "John Doe", email: "john.doe@company.com", company: "Company Inc", role: "Employee", groups: ["Newsletter"], totalEmails: 45 },
-    { id: "2", name: "Sarah Miller", email: "sarah@startup.io", company: "Startup.io", role: "Client", groups: ["Marketing", "Newsletter"], totalEmails: 32 },
-    { id: "3", name: "Mike Johnson", email: "mike@agency.co", company: "Agency Co", role: "Contractor", groups: [], totalEmails: 28 },
-    { id: "4", name: "Emily Chen", email: "emily@techcorp.com", company: "TechCorp", role: "Consultant", groups: ["Newsletter"], totalEmails: 19 },
-    { id: "5", name: "David Wilson", email: "david@enterprise.com", company: "Enterprise Ltd", role: "Employee", groups: ["Marketing"], totalEmails: 15 },
-    { id: "6", name: "Lisa Brown", email: "lisa@design.studio", company: "Design Studio", role: "Client", groups: [], totalEmails: 12 },
-];
-
-// Color palette for group badges
+// Group badges — tonal pills, no borders. Light bg + dark on-tone text for guaranteed contrast.
 const groupColors = [
-    { bg: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-700 dark:text-blue-300", border: "border-blue-200 dark:border-blue-800" },
-    { bg: "bg-emerald-100 dark:bg-emerald-900/40", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-200 dark:border-emerald-800" },
-    { bg: "bg-purple-100 dark:bg-purple-900/40", text: "text-purple-700 dark:text-purple-300", border: "border-purple-200 dark:border-purple-800" },
-    { bg: "bg-amber-100 dark:bg-amber-900/40", text: "text-amber-700 dark:text-amber-300", border: "border-amber-200 dark:border-amber-800" },
-    { bg: "bg-rose-100 dark:bg-rose-900/40", text: "text-rose-700 dark:text-rose-300", border: "border-rose-200 dark:border-rose-800" },
-    { bg: "bg-cyan-100 dark:bg-cyan-900/40", text: "text-cyan-700 dark:text-cyan-300", border: "border-cyan-200 dark:border-cyan-800" },
-    { bg: "bg-orange-100 dark:bg-orange-900/40", text: "text-orange-700 dark:text-orange-300", border: "border-orange-200 dark:border-orange-800" },
-    { bg: "bg-indigo-100 dark:bg-indigo-900/40", text: "text-indigo-700 dark:text-indigo-300", border: "border-indigo-200 dark:border-indigo-800" },
+    { bg: "bg-blue-100 dark:bg-blue-950/50", text: "text-blue-800 dark:text-blue-200" },
+    { bg: "bg-emerald-100 dark:bg-emerald-950/50", text: "text-emerald-800 dark:text-emerald-200" },
+    { bg: "bg-violet-100 dark:bg-violet-950/50", text: "text-violet-800 dark:text-violet-200" },
+    { bg: "bg-amber-100 dark:bg-amber-950/50", text: "text-amber-900 dark:text-amber-200" },
+    { bg: "bg-rose-100 dark:bg-rose-950/50", text: "text-rose-800 dark:text-rose-200" },
+    { bg: "bg-cyan-100 dark:bg-cyan-950/50", text: "text-cyan-800 dark:text-cyan-200" },
+    { bg: "bg-fuchsia-100 dark:bg-fuchsia-950/50", text: "text-fuchsia-800 dark:text-fuchsia-200" },
+    { bg: "bg-teal-100 dark:bg-teal-950/50", text: "text-teal-800 dark:text-teal-200" },
 ];
 
 const getGroupColor = (groupName: string) => {
-    // Generate consistent color index from group name
     let hash = 0;
     for (let i = 0; i < groupName.length; i++) {
         hash = groupName.charCodeAt(i) + ((hash << 5) - hash);
@@ -123,10 +113,75 @@ const getGroupColor = (groupName: string) => {
     return groupColors[index];
 };
 
+function FilterChip({
+    icon: Icon,
+    label,
+    onRemove,
+}: {
+    icon: (props: { className?: string }) => React.ReactNode;
+    label: string;
+    onRemove: () => void;
+}) {
+    return (
+        <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full bg-accent text-accent-foreground text-xs font-medium border border-border">
+            <Icon className="w-3 h-3 opacity-70" />
+            <span className="max-w-[140px] truncate">{label}</span>
+            <button
+                onClick={onRemove}
+                className="rounded-full p-0.5 hover:bg-foreground/10 transition-colors"
+                aria-label={`Remove ${label} filter`}
+            >
+                <X className="w-3 h-3" />
+            </button>
+        </span>
+    );
+}
+
+// Avatar palette — restrained 4-tone cool family. Each name maps deterministically
+// to one of these so contacts feel related, not like a rainbow.
+const avatarColors = [
+    { bg: "bg-blue-100 dark:bg-blue-900/40", text: "text-blue-700 dark:text-blue-200" },
+    { bg: "bg-slate-200 dark:bg-slate-700/50", text: "text-slate-700 dark:text-slate-100" },
+    { bg: "bg-indigo-100 dark:bg-indigo-900/40", text: "text-indigo-700 dark:text-indigo-200" },
+    { bg: "bg-sky-100 dark:bg-sky-900/40", text: "text-sky-700 dark:text-sky-200" },
+];
+
 export default function ContactsPage() {
-    const [contacts, setContacts] = useState<Contact[]>(mockContacts);
+    const [contacts, setContacts] = useState<Contact[]>([]);
+    const [contactsLoading, setContactsLoading] = useState(true);
     const [roles, setRoles] = useState<ContactRole[]>(defaultRoles);
     const [bulkGroups, setBulkGroups] = useState<BulkGroup[]>(defaultBulkGroups);
+
+    // Load contacts + derive groups from server
+    useEffect(() => {
+        let cancelled = false;
+        (async () => {
+            try {
+                const res = await fetch("/api/contacts");
+                const data = await res.json();
+                if (cancelled) return;
+                const items: Contact[] = (data.items ?? []).map((c: Contact) => ({
+                    id: c.id,
+                    name: c.name,
+                    email: c.email,
+                    company: c.company,
+                    role: c.role,
+                    groups: c.groups ?? [],
+                    totalEmails: c.totalEmails ?? 0,
+                }));
+                setContacts(items);
+                // Derive bulk groups from existing contacts so the filter works
+                const groupSet = new Set<string>();
+                items.forEach((c) => c.groups.forEach((g) => groupSet.add(g)));
+                setBulkGroups(Array.from(groupSet).map((name, i) => ({ id: String(i + 1), name })));
+            } catch (err) {
+                console.error("Failed to load contacts", err);
+            } finally {
+                if (!cancelled) setContactsLoading(false);
+            }
+        })();
+        return () => { cancelled = true; };
+    }, []);
     const [searchQuery, setSearchQuery] = useState("");
     const [companyFilter, setCompanyFilter] = useState<string>("all");
     const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -139,6 +194,7 @@ export default function ContactsPage() {
     const [bulkDeleteDialogOpen, setBulkDeleteDialogOpen] = useState(false);
     const [rolesDialogOpen, setRolesDialogOpen] = useState(false);
     const [groupsDialogOpen, setGroupsDialogOpen] = useState(false);
+    const [drawerContact, setDrawerContact] = useState<Contact | null>(null);
     const [groupFilterOpen, setGroupFilterOpen] = useState(false);
     const [newGroupName, setNewGroupName] = useState("");
     const [isCreatingGroup, setIsCreatingGroup] = useState(false);
@@ -146,11 +202,87 @@ export default function ContactsPage() {
     const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
     const [editingGroupInFilter, setEditingGroupInFilter] = useState<string | null>(null);
     const [editGroupName, setEditGroupName] = useState("");
+    const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
+    const importInputRef = useRef<HTMLInputElement>(null);
     const { toast } = useToast();
     const router = useRouter();
 
+    const activeFilterCount =
+        (companyFilter !== "all" ? 1 : 0) +
+        (roleFilter !== "all" ? 1 : 0) +
+        (groupFilter !== "all" ? 1 : 0);
+
+    const clearAllFilters = () => {
+        setCompanyFilter("all");
+        setRoleFilter("all");
+        setGroupFilter("all");
+        setSearchQuery("");
+    };
+
+    // Hash-based avatar tint from the dedicated cool-tone palette
+    const getAvatarColor = (name: string) => {
+        let hash = 0;
+        for (let i = 0; i < name.length; i++) {
+            hash = name.charCodeAt(i) + ((hash << 5) - hash);
+        }
+        return avatarColors[Math.abs(hash) % avatarColors.length];
+    };
+
+
     const roleOptions = useMemo(() => roles.map((r) => r.name), [roles]);
     const groupOptions = useMemo(() => bulkGroups.map((g) => g.name), [bulkGroups]);
+
+    const handleExportCsv = () => {
+        const headers = ["Name", "Email", "Company", "Role", "Groups", "Total Emails"];
+        const rows = contacts.map((c) => [
+            c.name, c.email, c.company, c.role, c.groups.join(";"), String(c.totalEmails),
+        ]);
+        const csv = [headers, ...rows]
+            .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
+            .join("\n");
+        const blob = new Blob([csv], { type: "text/csv" });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = "contacts.csv";
+        a.click();
+        URL.revokeObjectURL(url);
+        toast({ title: "Contacts exported", description: `${contacts.length} contacts exported to CSV.` });
+    };
+
+    const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            try {
+                const text = ev.target?.result as string;
+                const lines = text.split("\n").filter(Boolean);
+                const imported: Contact[] = lines.slice(1).map((line, i) => {
+                    const cols = line.split(",").map((c) => c.replace(/^"|"$/g, "").replace(/""/g, '"'));
+                    return {
+                        id: `imported-${Date.now()}-${i}`,
+                        name: cols[0] ?? "",
+                        email: cols[1] ?? "",
+                        company: cols[2] ?? "",
+                        role: cols[3] ?? roleOptions[0] ?? "",
+                        groups: cols[4] ? cols[4].split(";").filter(Boolean) : [],
+                        totalEmails: parseInt(cols[5] ?? "0", 10) || 0,
+                    };
+                }).filter((c) => c.name && c.email);
+                setContacts((prev) => {
+                    const existingEmails = new Set(prev.map((c) => c.email));
+                    const newOnes = imported.filter((c) => !existingEmails.has(c.email));
+                    return [...prev, ...newOnes];
+                });
+                toast({ title: "Contacts imported", description: `${imported.length} contacts imported successfully.` });
+            } catch {
+                toast({ title: "Import failed", description: "Could not parse the CSV file." });
+            }
+        };
+        reader.readAsText(file);
+        e.target.value = "";
+    };
 
     // Keyboard shortcuts
     useEffect(() => {
@@ -203,6 +335,14 @@ export default function ContactsPage() {
         return matchesSearch && matchesCompany && matchesRole && matchesGroup;
     });
 
+    const { page: contactPage, totalPages: contactTotalPages, paginatedItems: pagedContacts,
+        goNext: goContactNext, goPrev: goContactPrev, hasNext: hasContactNext, hasPrev: hasContactPrev,
+        from: contactFrom, to: contactTo, reset: resetContactPage } =
+        usePagination(filteredContacts, 10);
+
+    // Reset pagination when filters change
+    useEffect(() => { resetContactPage(); }, [searchQuery, companyFilter, roleFilter, groupFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
     const getInitials = (name: string) => {
         return name
             .split(" ")
@@ -226,19 +366,25 @@ export default function ContactsPage() {
         setDeleteDialogOpen(true);
     };
 
-    const handleConfirmDelete = () => {
+    const handleConfirmDelete = async () => {
         if (contactToDelete) {
-            setContacts((prev) => prev.filter((c) => c.id !== contactToDelete.id));
-            setSelectedContacts((prev) => {
-                const next = new Set(prev);
-                next.delete(contactToDelete.id);
-                return next;
-            });
-            toast({
-                title: "Contact deleted",
-                description: "The contact has been removed successfully.",
-                variant: "success",
-            });
+            try {
+                const res = await fetch(`/api/contacts/${contactToDelete.id}`, { method: "DELETE" });
+                if (!res.ok) throw new Error("Delete failed");
+                setContacts((prev) => prev.filter((c) => c.id !== contactToDelete.id));
+                setSelectedContacts((prev) => {
+                    const next = new Set(prev);
+                    next.delete(contactToDelete.id);
+                    return next;
+                });
+                toast({
+                    title: "Contact deleted",
+                    description: "The contact has been removed successfully.",
+                    variant: "success",
+                });
+            } catch (err) {
+                toast({ title: "Failed to delete", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+            }
             setContactToDelete(null);
         }
         setDeleteDialogOpen(false);
@@ -271,14 +417,21 @@ export default function ContactsPage() {
         setBulkDeleteDialogOpen(true);
     };
 
-    const handleConfirmBulkDelete = () => {
-        setContacts((prev) => prev.filter((c) => !selectedContacts.has(c.id)));
-        toast({
-            title: "Contacts deleted",
-            description: `${selectedContacts.size} contact(s) have been removed successfully.`,
-            variant: "success",
-        });
-        setSelectedContacts(new Set());
+    const handleConfirmBulkDelete = async () => {
+        try {
+            await Promise.all(
+                Array.from(selectedContacts).map((id) => fetch(`/api/contacts/${id}`, { method: "DELETE" }))
+            );
+            setContacts((prev) => prev.filter((c) => !selectedContacts.has(c.id)));
+            toast({
+                title: "Contacts deleted",
+                description: `${selectedContacts.size} contact(s) have been removed successfully.`,
+                variant: "success",
+            });
+            setSelectedContacts(new Set());
+        } catch (err) {
+            toast({ title: "Bulk delete failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+        }
         setBulkDeleteDialogOpen(false);
     };
 
@@ -349,7 +502,7 @@ export default function ContactsPage() {
         setSelectedContacts(new Set());
     };
 
-    const handleSubmitContact = (contactData: {
+    const handleSubmitContact = async (contactData: {
         id?: string;
         name: string;
         email: string;
@@ -357,37 +510,30 @@ export default function ContactsPage() {
         role: string;
         groups: string[];
     }) => {
-        if (contactData.id) {
-            // Edit existing contact
-            setContacts((prev) =>
-                prev.map((c) =>
-                    c.id === contactData.id
-                        ? { ...c, name: contactData.name, email: contactData.email, company: contactData.company, role: contactData.role, groups: contactData.groups }
-                        : c
-                )
-            );
-            toast({
-                title: "Contact updated",
-                description: "The contact has been updated successfully.",
-                variant: "success",
-            });
-        } else {
-            // Add new contact
-            const newContact: Contact = {
-                id: String(Date.now()),
-                name: contactData.name,
-                email: contactData.email,
-                company: contactData.company,
-                role: contactData.role,
-                groups: contactData.groups,
-                totalEmails: 0,
-            };
-            setContacts((prev) => [...prev, newContact]);
-            toast({
-                title: "Contact added",
-                description: "The new contact has been added successfully.",
-                variant: "success",
-            });
+        try {
+            if (contactData.id) {
+                const res = await fetch(`/api/contacts/${contactData.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(contactData),
+                });
+                if (!res.ok) throw new Error("Update failed");
+                const updated = await res.json();
+                setContacts((prev) => prev.map((c) => (c.id === contactData.id ? { ...c, ...updated } : c)));
+                toast({ title: "Contact updated", description: "The contact has been updated successfully.", variant: "success" });
+            } else {
+                const res = await fetch("/api/contacts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(contactData),
+                });
+                if (!res.ok) throw new Error("Create failed");
+                const created = await res.json();
+                setContacts((prev) => [created, ...prev]);
+                toast({ title: "Contact added", description: "The new contact has been added successfully.", variant: "success" });
+            }
+        } catch (err) {
+            toast({ title: "Save failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
         }
     };
 
@@ -609,343 +755,220 @@ export default function ContactsPage() {
 
     return (
         <>
-            <div className="p-4 md:p-8 max-w-7xl mx-auto">
-                <PageHeader
-                    title="Contacts"
-                    description="Manage your email contacts and recipients"
-                    action={
+            <div className="p-4 md:p-8 max-w-7xl mx-auto pb-32">
+                {/* ── Header ───────────────────────────────────────────────── */}
+                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
+                    <div>
+                        <h1 className="text-heading-2 font-heading text-foreground tracking-tight">Contacts</h1>
+                        <p className="text-body-sm text-muted-foreground mt-1">
+                            <span className="font-medium text-foreground">{contacts.length}</span> people
+                            <span className="mx-2 text-muted-foreground/40">·</span>
+                            <span className="font-medium text-foreground">{bulkGroups.length}</span> groups
+                            <span className="mx-2 text-muted-foreground/40">·</span>
+                            <span className="font-medium text-foreground">{contacts.reduce((s, c) => s + c.totalEmails, 0).toLocaleString()}</span> emails sent
+                        </p>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="outline" size="default" className="h-10">
+                                    <Settings2 className="w-4 h-4" />
+                                    <span className="hidden sm:inline">Manage</span>
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                                <DropdownMenuItem onClick={() => setRolesDialogOpen(true)}>
+                                    <UserCircle className="w-4 h-4 mr-2" />
+                                    Roles
+                                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">{roles.length}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => setGroupsDialogOpen(true)}>
+                                    <Tags className="w-4 h-4 mr-2" />
+                                    Groups
+                                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">{bulkGroups.length}</span>
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem onClick={handleExportCsv}>
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Export CSV
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => importInputRef.current?.click()}>
+                                    <Upload className="w-4 h-4 mr-2" />
+                                    Import CSV
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                        <input ref={importInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportCsv} />
                         <TooltipProvider>
-                            <div className="flex items-center gap-2">
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button variant="outline" onClick={() => setRolesDialogOpen(true)}>
-                                            <UserCircle className="w-4 h-4" />
-                                            Manage Roles
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p>Manage Roles <kbd className="ml-1 px-1.5 py-0.5 text-xs bg-muted rounded border">Ctrl+R</kbd></p>
-                                    </TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button variant="outline" onClick={() => setGroupsDialogOpen(true)}>
-                                            <Tags className="w-4 h-4" />
-                                            Manage Groups
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p>Manage Groups <kbd className="ml-1 px-1.5 py-0.5 text-xs bg-muted rounded border">Ctrl+G</kbd></p>
-                                    </TooltipContent>
-                                </Tooltip>
-                                <Tooltip>
-                                    <TooltipTrigger asChild>
-                                        <Button onClick={handleAddContact}>
-                                            <Plus className="w-4 h-4" />
-                                            Add Contact
-                                        </Button>
-                                    </TooltipTrigger>
-                                    <TooltipContent>
-                                        <p>Add Contact <kbd className="ml-1 px-1.5 py-0.5 text-xs bg-muted rounded border">Ctrl+N</kbd></p>
-                                    </TooltipContent>
-                                </Tooltip>
-                            </div>
+                            <Tooltip>
+                                <TooltipTrigger asChild>
+                                    <Button onClick={handleAddContact} className="h-10 shadow-primary">
+                                        <Plus className="w-4 h-4" />
+                                        Add Contact
+                                    </Button>
+                                </TooltipTrigger>
+                                <TooltipContent side="bottom">
+                                    <p className="text-xs">Add new contact <kbd className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-muted rounded border">Ctrl+N</kbd></p>
+                                </TooltipContent>
+                            </Tooltip>
                         </TooltipProvider>
-                    }
-                />
+                        <TopBarActions />
+                    </div>
+                </div>
 
-                {/* Search and Filter */}
+                {/* ── Hero search + Filter pivot ───────────────────────────── */}
                 <motion.div
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    className="mb-6 flex flex-col sm:flex-row gap-4"
+                    className="flex items-center gap-3 mb-3"
                 >
-                    <div className="relative flex-1 max-w-md">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                    <div className="relative flex-1">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
                         <Input
-                            placeholder="Search contacts..."
+                            placeholder="Search by name, email, or company…"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10"
+                            className="pl-11 pr-10 h-11 bg-card border-border shadow-card focus-visible:ring-1"
                         />
-                    </div>
-                    <Select value={companyFilter} onValueChange={setCompanyFilter}>
-                        <SelectTrigger className="w-full sm:w-[180px]">
-                            <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
-                            <SelectValue placeholder="Filter by company" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Companies</SelectItem>
-                            {companies.map((company) => (
-                                <SelectItem key={company} value={company}>
-                                    {company}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Select value={roleFilter} onValueChange={setRoleFilter}>
-                        <SelectTrigger className="w-full sm:w-[150px]">
-                            <UserCircle className="w-4 h-4 mr-2 text-muted-foreground" />
-                            <SelectValue placeholder="Filter by role" />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="all">All Roles</SelectItem>
-                            {roleOptions.map((role) => (
-                                <SelectItem key={role} value={role}>
-                                    {role}
-                                </SelectItem>
-                            ))}
-                        </SelectContent>
-                    </Select>
-                    <Popover open={groupFilterOpen} onOpenChange={(open) => {
-                        setGroupFilterOpen(open);
-                        if (!open) {
-                            setIsCreatingGroup(false);
-                            setNewGroupName("");
-                            setEditingGroupInFilter(null);
-                            setEditGroupName("");
-                        }
-                    }}>
-                        <PopoverTrigger asChild>
-                            <Button
-                                variant="outline"
-                                role="combobox"
-                                aria-expanded={groupFilterOpen}
-                                className="w-full sm:w-[180px] justify-between"
+                        {searchQuery && (
+                            <button
+                                onClick={() => setSearchQuery("")}
+                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                                aria-label="Clear search"
                             >
-                                <Tags className="w-4 h-4 mr-2 text-muted-foreground" />
-                                <span className="truncate">
-                                    {groupFilter === "all" ? "All Groups" : groupFilter}
-                                </span>
+                                <X className="w-3.5 h-3.5" />
+                            </button>
+                        )}
+                    </div>
+
+                    <Popover open={filterPopoverOpen} onOpenChange={setFilterPopoverOpen}>
+                        <PopoverTrigger asChild>
+                            <Button variant="outline" className="h-11 gap-2 relative whitespace-nowrap">
+                                <SlidersHorizontal className="w-4 h-4" />
+                                Filter
+                                {activeFilterCount > 0 && (
+                                    <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tabular-nums">
+                                        {activeFilterCount}
+                                    </span>
+                                )}
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-[220px] p-0" align="start">
-                            <Command>
-                                <CommandInput placeholder="Search groups..." />
-                                <CommandList>
-                                    <CommandEmpty>No group found.</CommandEmpty>
-                                    <CommandGroup>
-                                        <CommandItem
-                                            value="all"
-                                            onSelect={() => {
-                                                setGroupFilter("all");
-                                                setGroupFilterOpen(false);
-                                            }}
-                                        >
-                                            <Check className={`mr-2 h-4 w-4 ${groupFilter === "all" ? "opacity-100" : "opacity-0"}`} />
-                                            All Groups
-                                        </CommandItem>
-                                        {groupOptions.map((group) => (
-                                            editingGroupInFilter === group ? (
-                                                <div key={group} className="flex items-center gap-2 p-2">
-                                                    <Input
-                                                        value={editGroupName}
-                                                        onChange={(e) => setEditGroupName(e.target.value)}
-                                                        placeholder="Group name"
-                                                        className="h-8 text-sm flex-1"
-                                                        autoFocus
-                                                        onKeyDown={(e) => {
-                                                            if (e.key === "Enter") {
-                                                                e.preventDefault();
-                                                                handleSaveEditGroupInFilter();
-                                                            } else if (e.key === "Escape") {
-                                                                handleCancelEditGroupInFilter();
-                                                            }
-                                                        }}
-                                                    />
-                                                    <Button
-                                                        size="sm"
-                                                        className="h-8 px-2"
-                                                        onClick={handleSaveEditGroupInFilter}
-                                                        disabled={!editGroupName.trim()}
-                                                    >
-                                                        <Check className="h-4 w-4" />
-                                                    </Button>
-                                                </div>
-                                            ) : (
-                                                <CommandItem
-                                                    key={group}
-                                                    value={group}
-                                                    onSelect={() => {
-                                                        setGroupFilter(group);
-                                                        setGroupFilterOpen(false);
-                                                    }}
-                                                    className="flex items-center justify-between group/item"
-                                                >
-                                                    <div className="flex items-center">
-                                                        <Check className={`mr-2 h-4 w-4 ${groupFilter === group ? "opacity-100" : "opacity-0"}`} />
-                                                        {group}
-                                                    </div>
-                                                    <div className="flex items-center gap-1 opacity-0 group-hover/item:opacity-100 transition-opacity">
-                                                        <Edit2
-                                                            className="h-4 w-4 text-muted-foreground hover:text-foreground cursor-pointer"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleStartEditGroupInFilter(group);
-                                                            }}
-                                                        />
-                                                        <Trash2
-                                                            className="h-4 w-4 text-muted-foreground hover:text-destructive cursor-pointer"
-                                                            onClick={(e) => {
-                                                                e.stopPropagation();
-                                                                handleDeleteGroupClick(group);
-                                                            }}
-                                                        />
-                                                    </div>
-                                                </CommandItem>
-                                            )
-                                        ))}
-                                    </CommandGroup>
-                                    <CommandSeparator />
-                                    <CommandGroup>
-                                        {isCreatingGroup ? (
-                                            <div className="flex items-center gap-2 p-2">
-                                                <Input
-                                                    value={newGroupName}
-                                                    onChange={(e) => setNewGroupName(e.target.value)}
-                                                    placeholder="Group name"
-                                                    className="h-8 text-sm"
-                                                    autoFocus
-                                                    onKeyDown={(e) => {
-                                                        if (e.key === "Enter") {
-                                                            e.preventDefault();
-                                                            handleQuickCreateGroup();
-                                                        } else if (e.key === "Escape") {
-                                                            setIsCreatingGroup(false);
-                                                            setNewGroupName("");
-                                                        }
-                                                    }}
-                                                />
-                                                <Button
-                                                    size="sm"
-                                                    className="h-8 px-2"
-                                                    onClick={handleQuickCreateGroup}
-                                                    disabled={!newGroupName.trim()}
-                                                >
-                                                    <Plus className="h-4 w-4" />
-                                                </Button>
-                                            </div>
-                                        ) : (
-                                            <CommandItem
-                                                onSelect={() => setIsCreatingGroup(true)}
-                                                className="text-primary"
-                                            >
-                                                <Plus className="mr-2 h-4 w-4" />
-                                                Create New Group
-                                            </CommandItem>
-                                        )}
-                                    </CommandGroup>
-                                </CommandList>
-                            </Command>
+                        <PopoverContent className="w-[320px] p-4" align="end">
+                            <div className="flex items-center justify-between mb-4">
+                                <p className="text-sm font-medium">Refine results</p>
+                                {activeFilterCount > 0 && (
+                                    <button
+                                        onClick={clearAllFilters}
+                                        className="text-xs text-primary hover:underline flex items-center gap-1"
+                                    >
+                                        <FilterX className="w-3 h-3" /> Clear all
+                                    </button>
+                                )}
+                            </div>
+                            <div className="space-y-4">
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</label>
+                                    <Select value={companyFilter} onValueChange={setCompanyFilter}>
+                                        <SelectTrigger className="w-full">
+                                            <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All companies</SelectItem>
+                                            {companies.map((company) => (
+                                                <SelectItem key={company} value={company}>{company}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Role</label>
+                                    <Select value={roleFilter} onValueChange={setRoleFilter}>
+                                        <SelectTrigger className="w-full">
+                                            <UserCircle className="w-4 h-4 mr-2 text-muted-foreground" />
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All roles</SelectItem>
+                                            {roleOptions.map((role) => (
+                                                <SelectItem key={role} value={role}>{role}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                                <div className="space-y-1.5">
+                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Group</label>
+                                    <Select value={groupFilter} onValueChange={setGroupFilter}>
+                                        <SelectTrigger className="w-full">
+                                            <Tags className="w-4 h-4 mr-2 text-muted-foreground" />
+                                            <SelectValue />
+                                        </SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="all">All groups</SelectItem>
+                                            {groupOptions.map((group) => (
+                                                <SelectItem key={group} value={group}>{group}</SelectItem>
+                                            ))}
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            </div>
                         </PopoverContent>
                     </Popover>
-                    {groupFilter !== "all" && (
-                        <Button
-                            variant="default"
-                            size="sm"
-                            onClick={() => handleEmailGroup(groupFilter)}
-                            className="whitespace-nowrap"
-                        >
-                            <Mail className="w-4 h-4 mr-2" />
-                            Email Group
-                        </Button>
-                    )}
                 </motion.div>
 
-                {/* Bulk Actions Bar */}
-                <AnimatePresence>
-                    {selectedContacts.size > 0 && (
-                        <motion.div
-                            initial={{ opacity: 0, y: -10 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            exit={{ opacity: 0, y: -10 }}
-                            className="mb-4 p-4 bg-accent rounded-lg border border-border flex items-center justify-between"
-                        >
-                            <span className="text-body-base font-medium">
-                                {selectedContacts.size} contact{selectedContacts.size > 1 ? "s" : ""} selected
-                            </span>
-                            <div className="flex items-center gap-2">
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => setSelectedContacts(new Set())}
-                                >
-                                    Clear Selection
-                                </Button>
-                                {groupOptions.length > 0 && (
-                                    <>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="outline" size="sm">
-                                                    <Tags className="w-4 h-4 mr-2" />
-                                                    Add to Group
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                {groupOptions.map((group) => (
-                                                    <DropdownMenuItem
-                                                        key={group}
-                                                        onClick={() => handleBulkAssignGroup(group)}
-                                                    >
-                                                        {group}
-                                                    </DropdownMenuItem>
-                                                ))}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                        <DropdownMenu>
-                                            <DropdownMenuTrigger asChild>
-                                                <Button variant="outline" size="sm">
-                                                    <Minus className="w-4 h-4 mr-2" />
-                                                    Remove from Group
-                                                </Button>
-                                            </DropdownMenuTrigger>
-                                            <DropdownMenuContent align="end">
-                                                {groupOptions.map((group) => (
-                                                    <DropdownMenuItem
-                                                        key={group}
-                                                        onClick={() => handleBulkRemoveGroup(group)}
-                                                    >
-                                                        {group}
-                                                    </DropdownMenuItem>
-                                                ))}
-                                            </DropdownMenuContent>
-                                        </DropdownMenu>
-                                    </>
+                {/* ── Active filter chips + result counter ─────────────────── */}
+                <div className="flex items-center justify-between gap-3 mb-4 min-h-[28px]">
+                    <div className="flex flex-wrap items-center gap-2">
+                        {activeFilterCount > 0 && (
+                            <>
+                                {companyFilter !== "all" && (
+                                    <FilterChip icon={Building2} label={companyFilter} onRemove={() => setCompanyFilter("all")} />
                                 )}
-                                <Button
-                                    variant="default"
-                                    size="sm"
-                                    onClick={handleBulkEmail}
-                                >
-                                    <Send className="w-4 h-4 mr-2" />
-                                    Email Selected
-                                </Button>
-                                <Button
-                                    variant="destructive"
-                                    size="sm"
-                                    onClick={handleBulkDeleteClick}
-                                >
-                                    <Trash2 className="w-4 h-4 mr-2" />
-                                    Delete Selected
-                                </Button>
-                            </div>
-                        </motion.div>
-                    )}
-                </AnimatePresence>
+                                {roleFilter !== "all" && (
+                                    <FilterChip icon={UserCircle} label={roleFilter} onRemove={() => setRoleFilter("all")} />
+                                )}
+                                {groupFilter !== "all" && (
+                                    <FilterChip icon={Tags} label={groupFilter} onRemove={() => setGroupFilter("all")} />
+                                )}
+                                <button onClick={clearAllFilters} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
+                                    Clear all
+                                </button>
+                            </>
+                        )}
+                    </div>
+                    <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                        {groupFilter !== "all" && (
+                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-primary hover:text-primary hover:bg-accent" onClick={() => handleEmailGroup(groupFilter)}>
+                                <Mail className="w-3 h-3" />
+                                Email this group
+                            </Button>
+                        )}
+                        <span>{filteredContacts.length} {filteredContacts.length === 1 ? "result" : "results"}</span>
+                    </div>
+                </div>
 
-                {/* Contacts Table */}
+                {/* ── Contacts Table ───────────────────────────────────────── */}
                 {filteredContacts.length > 0 ? (
                     <motion.div
-                        initial={{ opacity: 0, y: 10 }}
+                        initial={{ opacity: 0, y: 8 }}
                         animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.1 }}
+                        transition={{ delay: 0.05 }}
                         className="bg-card rounded-xl border border-border shadow-card overflow-hidden"
                     >
                         <div className="overflow-x-auto">
-                            <table className="w-full">
+                            <table className="w-full table-fixed">
+                                <colgroup>
+                                    <col className="w-12" />
+                                    <col className="w-[26%]" />
+                                    <col className="w-[16%]" />
+                                    <col className="w-[12%]" />
+                                    <col />
+                                    <col className="w-[110px]" />
+                                    <col className="w-[140px]" />
+                                </colgroup>
                                 <thead>
-                                    <tr className="border-b border-border bg-muted/30">
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4 w-12">
+                                    <tr className="border-b border-border bg-muted/40">
+                                        <th className="px-4 py-3">
                                             <Checkbox
                                                 checked={isAllSelected}
                                                 onCheckedChange={(checked) => handleSelectAll(checked as boolean)}
@@ -953,135 +976,131 @@ export default function ContactsPage() {
                                                 className={isSomeSelected && !isAllSelected ? "data-[state=checked]:bg-primary/50" : ""}
                                             />
                                         </th>
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Contact
-                                        </th>
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Company
-                                        </th>
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Role
-                                        </th>
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Groups
-                                        </th>
-                                        <th className="text-left text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Emails Sent
-                                        </th>
-                                        <th className="text-right text-body-sm font-medium text-muted-foreground px-6 py-4">
-                                            Actions
-                                        </th>
+                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Contact</th>
+                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Company</th>
+                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Role</th>
+                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Groups</th>
+                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Emails</th>
+                                        <th className="text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Actions</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    {filteredContacts.map((contact) => (
-                                        <motion.tr
-                                            key={contact.id}
-                                            initial={{ opacity: 0 }}
-                                            animate={{ opacity: 1 }}
-                                            className={`border-b border-border last:border-b-0 hover:bg-muted/30 transition-colors ${selectedContacts.has(contact.id) ? "bg-accent/50" : ""
-                                                }`}
-                                        >
-                                            <td className="px-6 py-4">
-                                                <Checkbox
-                                                    checked={selectedContacts.has(contact.id)}
-                                                    onCheckedChange={(checked) => handleSelectContact(contact.id, checked as boolean)}
-                                                    aria-label={`Select ${contact.name}`}
-                                                />
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <div className="flex items-center gap-3">
-                                                    <Avatar className="h-10 w-10">
-                                                        <AvatarFallback className="bg-accent text-accent-foreground text-sm font-medium">
-                                                            {getInitials(contact.name)}
-                                                        </AvatarFallback>
-                                                    </Avatar>
-                                                    <div>
-                                                        <p className="text-body-base font-medium text-foreground">
-                                                            {contact.name}
-                                                        </p>
-                                                        <p className="text-body-sm text-muted-foreground">
-                                                            {contact.email}
-                                                        </p>
+                                    {pagedContacts.map((contact) => {
+                                        const isSelected = selectedContacts.has(contact.id);
+                                        const avatarColor = getAvatarColor(contact.name);
+                                        return (
+                                            <motion.tr
+                                                key={contact.id}
+                                                initial={{ opacity: 0 }}
+                                                animate={{ opacity: 1 }}
+                                                onClick={() => setDrawerContact(contact)}
+                                                className={`group/row border-b border-border last:border-b-0 transition-colors cursor-pointer ${isSelected ? "bg-primary/[0.06]" : "hover:bg-muted/40"}`}
+                                            >
+                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                    <Checkbox
+                                                        checked={isSelected}
+                                                        onCheckedChange={(checked) => handleSelectContact(contact.id, checked as boolean)}
+                                                        aria-label={`Select ${contact.name}`}
+                                                    />
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <div className="flex items-center gap-3">
+                                                        <Avatar className="h-9 w-9 ring-2 ring-background">
+                                                            <AvatarFallback className={`text-xs font-semibold ${avatarColor.bg} ${avatarColor.text}`}>
+                                                                {getInitials(contact.name)}
+                                                            </AvatarFallback>
+                                                        </Avatar>
+                                                        <div className="min-w-0">
+                                                            <p className="text-sm font-medium text-foreground truncate">{contact.name}</p>
+                                                            <p className="text-xs text-muted-foreground truncate">{contact.email}</p>
+                                                        </div>
                                                     </div>
-                                                </div>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-body-base text-foreground">
-                                                    {contact.company}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-accent text-accent-foreground">
-                                                    {contact.role}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                {contact.groups.length > 0 ? (
-                                                    <div className="flex flex-wrap gap-1.5">
-                                                        {contact.groups.map((group) => {
-                                                            const color = getGroupColor(group);
-                                                            return (
-                                                                <span
-                                                                    key={group}
-                                                                    className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium border ${color.bg} ${color.text} ${color.border}`}
-                                                                >
-                                                                    {group}
-                                                                </span>
-                                                            );
-                                                        })}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-sm text-foreground">{contact.company}</span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border">
+                                                        {contact.role}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    {contact.groups.length > 0 ? (
+                                                        <div className="flex flex-wrap gap-1 max-w-[220px]">
+                                                            {contact.groups.map((group) => {
+                                                                const color = getGroupColor(group);
+                                                                return (
+                                                                    <span
+                                                                        key={group}
+                                                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ${color.bg} ${color.text}`}
+                                                                    >
+                                                                        {group}
+                                                                    </span>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                    ) : (
+                                                        <span className="text-xs text-muted-foreground/50">—</span>
+                                                    )}
+                                                </td>
+                                                <td className="px-4 py-3">
+                                                    <span className="text-sm font-semibold text-foreground tabular-nums">
+                                                        {contact.totalEmails.toLocaleString()}
+                                                    </span>
+                                                </td>
+                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                                                    <div className="flex items-center justify-end gap-0.5 text-muted-foreground">
+                                                        <TooltipProvider delayDuration={300}>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Button variant="ghost" size="icon-sm" aria-label="Send email" onClick={() => handleSingleEmail(contact)} className="hover:text-primary">
+                                                                        <Mail className="w-4 h-4" />
+                                                                    </Button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top"><p className="text-xs">Send email</p></TooltipContent>
+                                                            </Tooltip>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Button variant="ghost" size="icon-sm" aria-label="Edit contact" onClick={() => handleEditContact(contact)} className="hover:text-foreground">
+                                                                        <Edit2 className="w-4 h-4" />
+                                                                    </Button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top"><p className="text-xs">Edit</p></TooltipContent>
+                                                            </Tooltip>
+                                                            <Tooltip>
+                                                                <TooltipTrigger asChild>
+                                                                    <Button variant="ghost" size="icon-sm" aria-label="Delete contact" onClick={() => handleDeleteClick(contact)} className="hover:text-destructive">
+                                                                        <Trash2 className="w-4 h-4" />
+                                                                    </Button>
+                                                                </TooltipTrigger>
+                                                                <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
+                                                            </Tooltip>
+                                                        </TooltipProvider>
                                                     </div>
-                                                ) : (
-                                                    <span className="text-body-sm text-muted-foreground">—</span>
-                                                )}
-                                            </td>
-                                            <td className="px-6 py-4">
-                                                <span className="text-body-base text-foreground">
-                                                    {contact.totalEmails}
-                                                </span>
-                                            </td>
-                                            <td className="px-6 py-4 text-right">
-                                                <div className="flex items-center justify-end gap-2">
-                                                    <Button
-                                                        variant="ghost"
-                                                        size="icon-sm"
-                                                        aria-label="Send email"
-                                                        onClick={() => handleSingleEmail(contact)}
-                                                    >
-                                                        <Mail className="w-4 h-4" />
-                                                    </Button>
-                                                    <DropdownMenu>
-                                                        <DropdownMenuTrigger asChild>
-                                                            <Button variant="ghost" size="icon-sm" aria-label="More options">
-                                                                <MoreVertical className="w-4 h-4" />
-                                                            </Button>
-                                                        </DropdownMenuTrigger>
-                                                        <DropdownMenuContent align="end">
-                                                            <DropdownMenuItem onClick={() => handleEditContact(contact)}>
-                                                                <Edit2 className="w-4 h-4 mr-2" />
-                                                                Edit
-                                                            </DropdownMenuItem>
-                                                            <DropdownMenuItem
-                                                                className="text-destructive"
-                                                                onClick={() => handleDeleteClick(contact)}
-                                                            >
-                                                                <Trash2 className="w-4 h-4 mr-2" />
-                                                                Delete
-                                                            </DropdownMenuItem>
-                                                        </DropdownMenuContent>
-                                                    </DropdownMenu>
-                                                </div>
-                                            </td>
-                                        </motion.tr>
-                                    ))}
+                                                </td>
+                                            </motion.tr>
+                                        );
+                                    })}
                                 </tbody>
                             </table>
                         </div>
                     </motion.div>
+                ) : activeFilterCount > 0 || searchQuery ? (
+                    <EmptyState
+                        icon={<FilterX className="w-8 h-8 text-muted-foreground" />}
+                        title="No contacts match your filters"
+                        description="Try adjusting your search or removing some filters."
+                        action={
+                            <Button variant="outline" onClick={clearAllFilters}>
+                                <FilterX className="w-4 h-4" />
+                                Clear filters
+                            </Button>
+                        }
+                    />
                 ) : (
                     <EmptyState
                         icon={<Users className="w-8 h-8 text-muted-foreground" />}
-                        title="No contacts found"
+                        title="No contacts yet"
                         description="Add your first contact to start sending emails."
                         action={
                             <Button onClick={handleAddContact}>
@@ -1091,7 +1110,118 @@ export default function ContactsPage() {
                         }
                     />
                 )}
+
+                {/* ── Footer (one-line) ────────────────────────────────────── */}
+                {filteredContacts.length > 0 && (
+                    <div className="flex items-center justify-between gap-3 mt-4 px-1 text-xs text-muted-foreground tabular-nums">
+                        <span>Showing {contactFrom}–{contactTo} of {filteredContacts.length}</span>
+                        {contactTotalPages > 1 && (
+                            <div className="flex items-center gap-1">
+                                <Button variant="ghost" size="icon-sm" onClick={goContactPrev} disabled={!hasContactPrev} aria-label="Previous page">
+                                    <ChevronLeft className="h-4 w-4" />
+                                </Button>
+                                <span className="px-2 font-medium">Page {contactPage} of {contactTotalPages}</span>
+                                <Button variant="ghost" size="icon-sm" onClick={goContactNext} disabled={!hasContactNext} aria-label="Next page">
+                                    <ChevronRight className="h-4 w-4" />
+                                </Button>
+                            </div>
+                        )}
+                    </div>
+                )}
             </div>
+
+            {/* ── Floating Bulk Action Toolbar ─────────────────────────────── */}
+            <AnimatePresence>
+                {selectedContacts.size > 0 && (
+                    <motion.div
+                        initial={{ opacity: 0, y: 24, scale: 0.95 }}
+                        animate={{ opacity: 1, y: 0, scale: 1 }}
+                        exit={{ opacity: 0, y: 24, scale: 0.95 }}
+                        transition={{ type: "spring", stiffness: 320, damping: 28 }}
+                        className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40"
+                    >
+                        <div className="flex items-center gap-1 px-2 py-1.5 rounded-full bg-foreground text-background shadow-2xl border border-foreground/10">
+                            <div className="flex items-center gap-2 pl-3 pr-2 py-1.5 border-r border-background/15">
+                                <span className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold tabular-nums">
+                                    {selectedContacts.size}
+                                </span>
+                                <span className="text-xs font-medium hidden sm:inline">selected</span>
+                            </div>
+
+                            <TooltipProvider delayDuration={200}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-background/10 text-background hover:text-background gap-1.5" onClick={handleBulkEmail}>
+                                            <Send className="w-3.5 h-3.5" />
+                                            <span className="hidden sm:inline">Email</span>
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Compose email to selected</p></TooltipContent>
+                                </Tooltip>
+
+                                {groupOptions.length > 0 && (
+                                    <>
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-background/10 text-background hover:text-background gap-1.5">
+                                                    <Tags className="w-3.5 h-3.5" />
+                                                    <span className="hidden sm:inline">Add to</span>
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="center" side="top">
+                                                {groupOptions.map((group) => (
+                                                    <DropdownMenuItem key={group} onClick={() => handleBulkAssignGroup(group)}>
+                                                        <Tags className="w-3.5 h-3.5 mr-2" />
+                                                        {group}
+                                                    </DropdownMenuItem>
+                                                ))}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+
+                                        <DropdownMenu>
+                                            <DropdownMenuTrigger asChild>
+                                                <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-background/10 text-background hover:text-background gap-1.5">
+                                                    <Minus className="w-3.5 h-3.5" />
+                                                    <span className="hidden sm:inline">Remove</span>
+                                                </Button>
+                                            </DropdownMenuTrigger>
+                                            <DropdownMenuContent align="center" side="top">
+                                                {groupOptions.map((group) => (
+                                                    <DropdownMenuItem key={group} onClick={() => handleBulkRemoveGroup(group)}>
+                                                        <Tags className="w-3.5 h-3.5 mr-2" />
+                                                        {group}
+                                                    </DropdownMenuItem>
+                                                ))}
+                                            </DropdownMenuContent>
+                                        </DropdownMenu>
+                                    </>
+                                )}
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-destructive/20 text-background hover:text-destructive-foreground gap-1.5" onClick={handleBulkDeleteClick}>
+                                            <Trash2 className="w-3.5 h-3.5" />
+                                            <span className="hidden sm:inline">Delete</span>
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Delete selected contacts</p></TooltipContent>
+                                </Tooltip>
+
+                                <div className="w-px h-5 bg-background/15 mx-0.5" />
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="icon-sm" className="h-8 w-8 hover:bg-background/10 text-background hover:text-background" onClick={() => setSelectedContacts(new Set())} aria-label="Clear selection">
+                                            <X className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Clear selection</p></TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
+                        </div>
+                    </motion.div>
+                )}
+            </AnimatePresence>
 
             <ContactDialog
                 open={dialogOpen}
@@ -1182,6 +1312,15 @@ export default function ContactsPage() {
                     </AlertDialogFooter>
                 </AlertDialogContent>
             </AlertDialog>
+
+            <ContactDetailDrawer
+                contact={drawerContact}
+                onClose={() => setDrawerContact(null)}
+                onEdit={(contact) => {
+                    setEditContact(contact);
+                    setDialogOpen(true);
+                }}
+            />
         </>
     );
 }
