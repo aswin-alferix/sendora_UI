@@ -9,6 +9,7 @@
  *   [Employee Name] / [Recipient Name] / [Name] — recipient name (or "team" for multi)
  *   [Job Title] / [Role]                       — recipient's role
  *   [Email]                                    — recipient's email
+ *   [Company] / [Organisation] / [Organization] — recipient's company
  *   [Your Name]                                — sender name (from mail config)
  *   [Signature]                                — user's default signature (HTML)
  */
@@ -101,6 +102,9 @@ export const AUTO_PLACEHOLDER_KEYS = new Set([
     "Job Title",
     "Role",
     "Email",
+    "Company",
+    "Organisation",
+    "Organization",
     "Your Name",
     "Signature",
 ]);
@@ -129,6 +133,7 @@ export function buildPersonalizationContext(args: {
     let name: string;
     let role: string;
     let email: string;
+    let company: string;
 
     if (args.recipientEmails.length === 1) {
         const recipient = args.recipientEmails[0];
@@ -137,17 +142,20 @@ export function buildPersonalizationContext(args: {
             name = match.name || nameFromEmail(recipient);
             role = match.role;
             email = match.email;
+            company = match.company;
         } else {
             // Unknown contact — best-effort name from email local-part
             name = nameFromEmail(recipient);
             role = "";
             email = recipient;
+            company = "";
         }
     } else {
         // Multiple recipients — generic "team"
         name = "team";
         role = "";
         email = args.recipientEmails.join(", ");
+        company = "";
     }
 
     // Custom values come first so auto-resolved keys always win
@@ -160,6 +168,9 @@ export function buildPersonalizationContext(args: {
         "Job Title": role,
         "Role": role,
         "Email": email,
+        "Company": company,
+        "Organisation": company,
+        "Organization": company,
         "Your Name": args.senderName,
         // Compact the signature so inline substitution doesn't bring paragraph margins along
         "Signature": compactSignatureHtml(args.signatureHtml),

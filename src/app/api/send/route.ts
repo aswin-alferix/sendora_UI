@@ -4,10 +4,11 @@ import { getCollection } from "@/lib/mongo/client";
 import { COLLECTIONS, EmailDoc, ContactDoc, SignatureDoc } from "@/lib/mongo/schema";
 import { getUserIdFromRequest } from "@/lib/mongo/user";
 import { buildPersonalizationContext, substitute, appendSignatureIfMissing } from "@/lib/mail/substitute";
+import { sendViaGraph, getGraphConfig, GRAPH_NOT_CONFIGURED } from "@/lib/mail/graph";
 
 export const dynamic = "force-dynamic";
 
-type ProviderId = "resend" | "sendgrid" | "ses";
+type ProviderId = "resend" | "sendgrid" | "ses" | "graph";
 
 interface SendRequest {
     provider: ProviderId;
@@ -144,6 +145,17 @@ async function callProvider(args: {
         };
     }
 
+    if (args.provider === "graph") {
+        return sendViaGraph({
+            fromName: args.fromName,
+            to: args.to,
+            cc: args.cc,
+            bcc: args.bcc,
+            subject: args.subject,
+            html: args.html,
+        });
+    }
+
     if (args.provider === "ses") {
         return {
             ok: false,
@@ -184,6 +196,21 @@ export async function POST(req: Request) {
             );
         }
         scheduledAtIso = d.toISOString();
+    }
+
+    // Microsoft Graph: server-side credentials, sends from MAIL_SENDER_ADDRESS, no scheduling
+    if (body.provider === "graph") {
+        const graph = getGraphConfig();
+        if (!graph) {
+            return NextResponse.json({ error: GRAPH_NOT_CONFIGURED }, { status: 500 });
+        }
+        if (scheduledAtIso) {
+            return NextResponse.json(
+                { error: "Scheduled sending isn't supported with Microsoft 365 yet. Send now instead." },
+                { status: 400 }
+            );
+        }
+        body.fromEmail = graph.senderAddress;
     }
 
     const userId = getUserIdFromRequest(req);

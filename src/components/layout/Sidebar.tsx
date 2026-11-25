@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
 import {
     Mail,
+    Mails,
     Send,
     LayoutDashboard,
     History,
@@ -23,6 +24,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 const navigation = [
     { name: "Dashboard", href: "/", icon: LayoutDashboard },
     { name: "Compose", href: "/compose", icon: Mail },
+    { name: "Bulk Send", href: "/bulk-send", icon: Mails },
     { name: "Sent", href: "/sent", icon: Send },
     { name: "Templates", href: "/templates", icon: FileText },
     { name: "Contacts", href: "/contacts", icon: Users },

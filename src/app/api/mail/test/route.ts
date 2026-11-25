@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
+import { getGraphConfig, getGraphToken, GRAPH_NOT_CONFIGURED } from "@/lib/mail/graph";
 
 interface TestRequest {
-    provider: "resend" | "sendgrid" | "ses";
+    provider: "resend" | "sendgrid" | "ses" | "graph";
     apiKey?: string;
     awsAccessKeyId?: string;
     awsSecretAccessKey?: string;
@@ -50,6 +51,21 @@ export async function POST(req: Request) {
                 );
             }
             return NextResponse.json({ ok: true });
+        }
+
+        if (body.provider === "graph") {
+            // Credentials live in server env — check they exist and can get a token.
+            const cfg = getGraphConfig();
+            if (!cfg) return NextResponse.json({ error: GRAPH_NOT_CONFIGURED }, { status: 400 });
+            try {
+                await getGraphToken(cfg);
+            } catch (err) {
+                return NextResponse.json(
+                    { error: err instanceof Error ? err.message : "Microsoft token request failed" },
+                    { status: 401 }
+                );
+            }
+            return NextResponse.json({ ok: true, senderAddress: cfg.senderAddress });
         }
 
         if (body.provider === "ses") {

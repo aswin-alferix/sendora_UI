@@ -6,7 +6,9 @@ const PUBLIC_PATHS = ["/login"];
 export function proxy(request: NextRequest) {
     const { pathname } = request.nextUrl;
     const isPublic = PUBLIC_PATHS.some((p) => pathname.startsWith(p));
-    const token = request.cookies.get("auth_token")?.value;
+    // Set by the API alongside its httpOnly session cookies. Only a hint for
+    // redirects; every /api call is still checked by the API itself.
+    const token = request.cookies.get("sendora_session")?.value;
 
     if (!isPublic && !token) {
         const loginUrl = request.nextUrl.clone();

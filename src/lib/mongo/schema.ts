@@ -40,7 +40,7 @@ export interface SignatureDoc {
 export interface EmailDoc {
     id: string;
     userId: string;
-    provider: "resend" | "sendgrid" | "ses";
+    provider: "resend" | "sendgrid" | "ses" | "graph";
     providerMessageId?: string; // id returned by provider
     status: "sent" | "scheduled" | "failed";
     fromName: string;

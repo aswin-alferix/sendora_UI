@@ -15,6 +15,7 @@ import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor, type Attachment } from "@/components/email/RichTextEditor";
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
 import { AUTO_PLACEHOLDER_KEYS, extractPlaceholders } from "@/lib/mail/substitute";
+import { apiErrorMessage } from "@/contexts/AuthContext";
 
 const emailListSchema = z
     .string()
@@ -224,7 +225,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             if (!res.ok) {
                 toast({
                     title: "Send failed",
-                    description: result.error || `Provider returned HTTP ${res.status}`,
+                    description: apiErrorMessage(result, `Provider returned HTTP ${res.status}`),
                     variant: "destructive",
                 });
                 return;

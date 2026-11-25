@@ -5,8 +5,11 @@ import { useState, useEffect, Suspense } from "react";
 import { motion } from "framer-motion";
 import { Instrument_Serif } from "next/font/google";
 import { Loader2, ShieldCheck, Sparkles, MailOpen, Send } from "lucide-react";
-import { useAuth } from "@/contexts/AuthContext";
+import { hasMsalResponse, useAuth } from "@/contexts/AuthContext";
 import { cn } from "@/lib/utils";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const display = Instrument_Serif({
     weight: "400",
@@ -85,33 +88,103 @@ function EmailCard({
     );
 }
 
+// Codes the API's Microsoft flow redirects back with (?ms_error=…)
+const MS_ERRORS: Record<string, string> = {
+    not_configured:
+        "Microsoft sign-in isn't set up on the server yet. Use your email and password, or ask an admin to configure it.",
+    account_exists:
+        "An account with this email already exists. Sign in with your password, then connect Microsoft from Settings.",
+    already_linked: "That Microsoft account is already linked to another Sendora account.",
+    access_denied: "Microsoft sign-in was cancelled.",
+    invalid_state: "The sign-in took too long or was opened in another tab. Please try again.",
+    missing_email: "Your Microsoft account didn't share an email address, so it can't be used to sign in.",
+};
+
+/** Only same-site paths, so ?from= can't send people to another site. */
+function safeRedirect(from: string | null | undefined): string {
+    return from && from.startsWith("/") && !from.startsWith("//") ? from : "/";
+}
+
 function LoginContent() {
-    const { loginWithMicrosoft, isAuthenticated, isLoading: authLoading } = useAuth();
+    const {
+        loginWithMicrosoft,
+        completeMicrosoftSignIn,
+        loginWithPassword,
+        register,
+        isAuthenticated,
+        isLoading: authLoading,
+    } = useAuth();
     const router = useRouter();
     const searchParams = useSearchParams();
     const [loading, setLoading] = useState(false);
-    const [error, setError] = useState<string | null>(null);
+    const [formLoading, setFormLoading] = useState(false);
+    const msError = searchParams?.get("ms_error");
+    const [error, setError] = useState<string | null>(
+        msError ? MS_ERRORS[msError] ?? "Microsoft sign-in failed. Please try again." : null
+    );
+    const [mode, setMode] = useState<"signin" | "signup">("signin");
+    const [name, setName] = useState("");
+    const [email, setEmail] = useState("");
+    const [password, setPassword] = useState("");
 
-    const redirectTo = searchParams?.get("from") || "/";
+    const redirectTo = safeRedirect(searchParams?.get("from"));
 
-    // Catches both fresh popup logins AND post-redirect-return logins
+    // Already signed in (or just returned from Microsoft) → go on
     useEffect(() => {
         if (!authLoading && isAuthenticated) {
             router.replace(redirectTo);
         }
     }, [authLoading, isAuthenticated, redirectTo, router]);
 
+    // Back from Microsoft (#code=…): finish sign-in through the API.
+    useEffect(() => {
+        if (!hasMsalResponse()) return;
+        let cancelled = false;
+        const finish = async () => {
+            setLoading(true);
+            try {
+                const next = await completeMicrosoftSignIn();
+                if (!cancelled && next) router.replace(safeRedirect(next));
+                else if (!cancelled) setLoading(false);
+            } catch (err) {
+                if (cancelled) return;
+                setError(err instanceof Error ? err.message : "Microsoft sign-in failed. Please try again.");
+                setLoading(false);
+                window.history.replaceState(null, "", window.location.pathname + window.location.search);
+            }
+        };
+        void finish();
+        return () => {
+            cancelled = true;
+        };
+    }, [completeMicrosoftSignIn, router]);
+
     const handleMicrosoftLogin = async () => {
         setError(null);
         setLoading(true);
         try {
-            await loginWithMicrosoft();
-            router.replace(redirectTo);
+            await loginWithMicrosoft(redirectTo); // full-page redirect to Microsoft
         } catch (err) {
             setError(err instanceof Error ? err.message : "Microsoft sign-in failed. Please try again.");
             setLoading(false);
         }
     };
+
+    const handleSubmit = async (e: React.FormEvent) => {
+        e.preventDefault();
+        setError(null);
+        setFormLoading(true);
+        try {
+            if (mode === "signup") await register(name.trim(), email.trim(), password);
+            else await loginWithPassword(email.trim(), password);
+            router.replace(redirectTo);
+        } catch (err) {
+            setError(err instanceof Error ? err.message : "Sign-in failed. Please try again.");
+            setFormLoading(false);
+        }
+    };
+
+    const busy = loading || formLoading;
 
     return (
         <div className="min-h-screen w-full grid lg:grid-cols-[1.1fr_1fr] bg-background">
@@ -318,7 +391,9 @@ function LoginContent() {
                             Welcome back.
                         </h1>
                         <p className="text-body-sm text-muted-foreground mt-2">
-                            Sign in with your Microsoft work or school account to continue.
+                            {mode === "signup"
+                                ? "Create your Sendora account to continue."
+                                : "Sign in with Microsoft or your email to continue."}
                         </p>
                     </div>
 
@@ -336,7 +411,7 @@ function LoginContent() {
                         whileHover={!loading ? { y: -1 } : {}}
                         whileTap={!loading ? { y: 0 } : {}}
                         onClick={handleMicrosoftLogin}
-                        disabled={loading}
+                        disabled={busy}
                         className="group relative w-full flex items-center justify-center gap-3 px-4 py-3.5 rounded-xl bg-foreground text-background hover:bg-foreground/90 active:bg-foreground transition-colors font-medium text-sm disabled:opacity-60 disabled:cursor-not-allowed shadow-lg shadow-foreground/15"
                         aria-label="Sign in with Microsoft"
                     >
@@ -355,11 +430,84 @@ function LoginContent() {
                         )}
                     </motion.button>
 
+                    <div className="my-6 flex items-center gap-3 text-[11px] uppercase tracking-wider text-muted-foreground">
+                        <span className="h-px flex-1 bg-border" />
+                        or
+                        <span className="h-px flex-1 bg-border" />
+                    </div>
+
+                    <form onSubmit={handleSubmit} className="space-y-3" noValidate>
+                        {mode === "signup" && (
+                            <div className="space-y-1.5">
+                                <Label htmlFor="name">Full name</Label>
+                                <Input
+                                    id="name"
+                                    autoComplete="name"
+                                    value={name}
+                                    onChange={(e) => setName(e.target.value)}
+                                    disabled={busy}
+                                    required
+                                />
+                            </div>
+                        )}
+                        <div className="space-y-1.5">
+                            <Label htmlFor="email">Email</Label>
+                            <Input
+                                id="email"
+                                type="email"
+                                autoComplete="email"
+                                value={email}
+                                onChange={(e) => setEmail(e.target.value)}
+                                disabled={busy}
+                                required
+                            />
+                        </div>
+                        <div className="space-y-1.5">
+                            <Label htmlFor="password">Password</Label>
+                            <Input
+                                id="password"
+                                type="password"
+                                autoComplete={mode === "signup" ? "new-password" : "current-password"}
+                                value={password}
+                                onChange={(e) => setPassword(e.target.value)}
+                                disabled={busy}
+                                required
+                            />
+                            {mode === "signup" && (
+                                <p className="text-[11px] text-muted-foreground">At least 8 characters.</p>
+                            )}
+                        </div>
+                        <Button
+                            type="submit"
+                            variant="outline"
+                            className="w-full"
+                            disabled={busy || !email || !password || (mode === "signup" && !name.trim())}
+                        >
+                            {formLoading && <Loader2 className="w-4 h-4 animate-spin" />}
+                            {mode === "signup" ? "Create account" : "Sign in with email"}
+                        </Button>
+                    </form>
+
+                    <p className="mt-4 text-center text-xs text-muted-foreground">
+                        {mode === "signup" ? "Already have an account?" : "New to Sendora?"}{" "}
+                        <button
+                            type="button"
+                            className="text-primary hover:underline font-medium"
+                            disabled={busy}
+                            onClick={() => {
+                                setMode(mode === "signup" ? "signin" : "signup");
+                                setError(null);
+                            }}
+                        >
+                            {mode === "signup" ? "Sign in" : "Create an account"}
+                        </button>
+                    </p>
+
                     <div className="mt-5 flex items-start gap-2.5 px-3 py-2.5 rounded-lg bg-muted/50 border border-border/60 text-xs text-muted-foreground">
                         <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5 text-primary" />
                         <span>
-                            Single sign-on is the only supported sign-in method. Access is managed by your
-                            organization through Microsoft Entra ID.
+                            Your session is kept in secure, httpOnly cookies. Microsoft sign-in uses your
+                            organization&apos;s Microsoft Entra ID.
                         </span>
                     </div>
 

@@ -5,12 +5,11 @@ const backendUrl = (process.env.BACKEND_URL ?? "http://localhost:8000").replace(
 const nextConfig: NextConfig = {
   async rewrites() {
     return {
-      // `fallback` runs only after every Next.js route (including dynamic API
-      // routes) fails to match. The existing app/api handlers keep working, and
-      // anything they don't serve (/api/auth/*, /api/health, …) goes to the
-      // NestJS API on the same origin, so auth cookies stay first-party.
-      // Remove each app/api handler as its endpoint moves to the backend.
-      fallback: [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }],
+      // Every /api/* request goes to the NestJS API (sendors_API) on the same
+      // origin, so its httpOnly auth cookies stay first-party. `beforeFiles`
+      // runs before Next.js routes, so the old src/app/api handlers can never
+      // shadow the backend, even if their files are still on disk.
+      beforeFiles: [{ source: "/api/:path*", destination: `${backendUrl}/api/:path*` }],
     };
   },
 };

@@ -22,11 +22,18 @@ const tenantId = process.env.NEXT_PUBLIC_MSAL_TENANT_ID ?? "common";
 
 export const isMsalConfigured = !!clientId;
 
+// Same as Nexus: Microsoft returns to the site root (that's the redirect URI
+// registered on the shared Azure app); proxy.ts forwards it to /login, which
+// finishes the sign-in. Override with NEXT_PUBLIC_MSAL_REDIRECT_URI if needed.
+const redirectUri =
+    process.env.NEXT_PUBLIC_MSAL_REDIRECT_URI ||
+    (typeof window !== "undefined" ? window.location.origin : "/");
+
 export const msalConfig: Configuration = {
     auth: {
         clientId,
         authority: `https://login.microsoftonline.com/${tenantId}`,
-        redirectUri: typeof window !== "undefined" ? `${window.location.origin}/login` : "/login",
+        redirectUri,
         postLogoutRedirectUri:
             typeof window !== "undefined" ? `${window.location.origin}/login` : "/login",
     },
@@ -44,13 +51,12 @@ export const msalConfig: Configuration = {
     },
 };
 
-/** Scopes requested at sign-in. User.Read lets us call Graph /me for profile data. */
+/** Scopes requested at sign-in (same as Nexus). The ID token is what the API verifies. */
 export const loginRequest = {
     scopes: ["User.Read", "openid", "profile", "email"],
 };
-
 /**
- * Singleton MSAL instance. Must call `await msalInstance.initialize()` before use.
- * That happens once in the MsalGate component.
+ * Singleton MSAL instance. Must call `await msalInstance.initialize()` before use
+ * (AuthContext does, when Microsoft sign-in starts or finishes).
  */
 export const msalInstance = new PublicClientApplication(msalConfig);

@@ -14,6 +14,7 @@ import {
     Lock,
     Globe,
     User as UserIcon,
+    Building2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,10 +28,11 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { apiErrorMessage } from "@/contexts/AuthContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
-export type ProviderId = "sendgrid" | "resend" | "ses";
+export type ProviderId = "sendgrid" | "resend" | "ses" | "graph";
 
 export interface MailConfigState {
     provider: ProviderId;
@@ -89,6 +91,14 @@ const providers: Array<{
         icon: Cloud,
         accent: "bg-amber-500",
         docsUrl: "https://console.aws.amazon.com/ses",
+    },
+    {
+        id: "graph",
+        name: "Microsoft 365",
+        description: "Microsoft Graph, server-configured",
+        icon: Building2,
+        accent: "bg-blue-600",
+        docsUrl: "",
     },
 ];
 
@@ -154,6 +164,9 @@ export function MailProviderConfig() {
                 if (!config.sesSecretAccessKey.trim()) return "AWS secret access key is required.";
                 if (!config.sesRegion) return "Select a region.";
                 return null;
+            case "graph":
+                // Credentials live in the API's env (sendors_API/.env)
+                return null;
         }
     };
 
@@ -188,7 +201,7 @@ export function MailProviderConfig() {
             } else {
                 setTestResult({
                     ok: false,
-                    message: data.error || `${activeProvider.name} returned ${res.status}`,
+                    message: apiErrorMessage(data, `${activeProvider.name} returned ${res.status}`),
                 });
             }
         } catch (err) {
@@ -234,7 +247,7 @@ export function MailProviderConfig() {
             </div>
 
             {/* Provider picker */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                 {providers.map((p) => {
                     const Icon = p.icon;
                     const selected = config.provider === p.id;
@@ -313,6 +326,13 @@ export function MailProviderConfig() {
                             <p className="text-[11px] text-muted-foreground mt-2">
                                 Tip: Resend requires a verified domain. Use{" "}
                                 <span className="font-mono">onboarding@resend.dev</span> while testing.
+                            </p>
+                        )}
+                        {config.provider === "graph" && (
+                            <p className="text-[11px] text-muted-foreground mt-2">
+                                Mail is always sent from the server&apos;s{" "}
+                                <span className="font-mono">MAIL_SENDER_ADDRESS</span> mailbox; the sender
+                                name is used as the display name.
                             </p>
                         )}
                     </div>
@@ -396,6 +416,24 @@ export function MailProviderConfig() {
                                         </SelectContent>
                                     </Select>
                                 </FieldRow>
+                            </div>
+                        )}
+
+                        {config.provider === "graph" && (
+                            <div className="rounded-md border border-border bg-muted/40 px-4 py-3 text-xs text-muted-foreground space-y-1.5">
+                                <p>
+                                    Credentials are read from the API&apos;s{" "}
+                                    <span className="font-mono">sendors_API/.env</span>, never stored in the browser:
+                                </p>
+                                <p className="font-mono leading-relaxed">
+                                    AZURE_AD_TENANT_ID, MAIL_APP_CLIENT_ID, AZURE_AD_CLIENT_SECRET,
+                                    MAIL_SENDER_ADDRESS
+                                </p>
+                                <p>
+                                    The app needs the Microsoft Graph application permission{" "}
+                                    <span className="font-mono">Mail.Send</span> with admin consent. Use Test
+                                    Connection to check them.
+                                </p>
                             </div>
                         )}
                     </div>
