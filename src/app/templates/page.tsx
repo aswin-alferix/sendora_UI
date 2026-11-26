@@ -33,6 +33,7 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { CreateTemplateDialog } from "@/components/templates/CreateTemplateDialog";
 import { useToast } from "@/hooks/use-toast";
+import type { UploadedFile } from "@/lib/files";
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
 
 // Wrap [Anything] in chip spans so the preview matches the editor's chip styling
@@ -68,6 +69,7 @@ interface Template {
     subject: string;
     description: string;
     body?: string;
+    attachments?: UploadedFile[];
     updatedAt: string;
 }
 
@@ -125,12 +127,13 @@ export default function TemplatesPage() {
                 const res = await fetch("/api/templates");
                 const data = await res.json();
                 if (cancelled) return;
-                const items: Template[] = (data.items ?? []).map((t: { id: string; name: string; subject: string; description: string; body?: string; updatedAt: string; }) => ({
+                const items: Template[] = (data.items ?? []).map((t: { id: string; name: string; subject: string; description: string; body?: string; attachments?: UploadedFile[]; updatedAt: string; }) => ({
                     id: t.id,
                     name: t.name,
                     subject: t.subject,
                     description: t.description,
                     body: t.body,
+                    attachments: t.attachments ?? [],
                     updatedAt: relativeTime(t.updatedAt),
                 }));
                 setTemplates(items);
@@ -171,6 +174,7 @@ export default function TemplatesPage() {
         subject: string;
         description: string;
         body: string;
+        attachmentIds: string[];
     }) => {
         try {
             if (templateData.id) {
@@ -245,6 +249,7 @@ export default function TemplatesPage() {
                     subject: template.subject,
                     description: template.description,
                     body: template.body ?? "",
+                    attachmentIds: (template.attachments ?? []).map((a) => a.id),
                 }),
             });
             if (!res.ok) throw new Error("Duplicate failed");
@@ -275,7 +280,7 @@ export default function TemplatesPage() {
     const handleUseInCompose = (template: Template) => {
         sessionStorage.setItem(
             "pending_compose_template",
-            JSON.stringify({ subject: template.subject, body: template.body ?? "" })
+            JSON.stringify({ subject: template.subject, body: template.body ?? "", attachments: template.attachments ?? [] })
         );
         router.push("/compose");
     };
@@ -501,7 +506,7 @@ export default function TemplatesPage() {
 
                             <p className="text-[11px] text-muted-foreground/80 mt-3 text-center leading-relaxed">
                                 Chips like{" "}
-                                <span className="sd-placeholder-chip">[Employee Name]</span>{" "}
+                                <span className="sd-placeholder-chip">[Name]</span>{" "}
                                 get filled in at send time with the recipient&apos;s info.
                             </p>
                         </div>

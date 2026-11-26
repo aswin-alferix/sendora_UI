@@ -7,6 +7,7 @@ import TextAlign from "@tiptap/extension-text-align";
 import Color from "@tiptap/extension-color";
 import { TextStyle } from "@tiptap/extension-text-style";
 import Link from "@tiptap/extension-link";
+import { dataUrlToBlob, formatBytes, uploadFile } from "@/lib/files";
 import ImageBase from "@tiptap/extension-image";
 
 // Add width/height attributes so we can resize images in the editor + preserve
@@ -36,7 +37,7 @@ import { TableRow } from "@tiptap/extension-table-row";
 import { TableHeader } from "@tiptap/extension-table-header";
 import { TableCell } from "@tiptap/extension-table-cell";
 import { PlaceholderHighlight } from "@/lib/editor/placeholder-highlight";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
     Bold, Italic, Underline as UnderlineIcon, Strikethrough,
     AlignLeft, AlignCenter, AlignRight,
@@ -82,6 +83,8 @@ export interface Attachment {
     type: string;
     isImage?: boolean;
     preview?: string;
+    /** Server file id (POST /api/files); only uploaded files are sent with the email. */
+    id?: string;
 }
 
 interface RichTextEditorProps {
@@ -177,6 +180,7 @@ export function RichTextEditor({
 }: RichTextEditorProps) {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploading, setUploading] = useState(0);
 
     const editor = useEditor({
         immediatelyRender: false,
@@ -241,31 +245,51 @@ export function RichTextEditor({
         if (!file.type.startsWith("image/")) return;
         if (file.size > 5 * 1024 * 1024) { alert("Image must be under 5MB."); return; }
 
+        setUploading((n) => n + 1);
         try {
-            // Resize + compress so the base64 doesn't bloat the saved HTML.
+            // Resize + compress, then store it on the server. The body keeps a short
+            // /api/files URL; at send time it's attached inline so recipients see it.
             // A 4000×3000 phone photo (~3MB) becomes ~120KB after this pass.
             const compressedSrc = await compressImage(file, 1200, 0.85);
-            editor.chain().focus().setImage({ src: compressedSrc, width: 200 } as { src: string }).run();
+            const blob = await dataUrlToBlob(compressedSrc);
+            const uploaded = await uploadFile(blob, file.name);
+            editor.chain().focus().setImage({ src: uploaded.url, width: 200 } as { src: string }).run();
         } catch (err) {
-            console.error("Image processing failed", err);
-            alert("Couldn't process that image. Try a different file.");
+            console.error("Image upload failed", err);
+            alert(err instanceof Error ? `Couldn't add that image: ${err.message}` : "Couldn't add that image. Try a different file.");
+        } finally {
+            setUploading((n) => n - 1);
         }
     }, [editor]);
 
-    const handleFileUpload = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-        const files = e.target.files;
-        if (!files || !onAttachmentsChange) return;
+    const handleFileUpload = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const files = e.target.files ? Array.from(e.target.files) : [];
+        e.target.value = "";
+        if (!files.length || !onAttachmentsChange) return;
 
         const added: Attachment[] = [];
-        for (let i = 0; i < files.length; i++) {
-            const file = files[i];
-            if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" exceeds 10MB.`); continue; }
-            const kb = file.size / 1024;
-            const size = kb >= 1024 ? `${(kb / 1024).toFixed(1)} MB` : `${kb.toFixed(1)} KB`;
-            added.push({ name: file.name, size, type: file.type || "application/octet-stream" });
+        setUploading((n) => n + 1);
+        try {
+            for (const file of files) {
+                if (file.size > 10 * 1024 * 1024) { alert(`"${file.name}" exceeds 10MB.`); continue; }
+                try {
+                    const uploaded = await uploadFile(file, file.name);
+                    added.push({
+                        id: uploaded.id,
+                        name: uploaded.filename,
+                        size: formatBytes(uploaded.size),
+                        type: uploaded.contentType,
+                        isImage: uploaded.contentType.startsWith("image/"),
+                        preview: uploaded.contentType.startsWith("image/") ? uploaded.url : undefined,
+                    });
+                } catch (err) {
+                    alert(`Couldn't attach "${file.name}": ${err instanceof Error ? err.message : String(err)}`);
+                }
+            }
+        } finally {
+            setUploading((n) => n - 1);
         }
         if (added.length) onAttachmentsChange([...attachments, ...added]);
-        e.target.value = "";
     }, [attachments, onAttachmentsChange]);
 
     const removeAttachment = useCallback((index: number) => {
@@ -538,7 +562,7 @@ export function RichTextEditor({
                     {/* Hidden file inputs */}
                     <input ref={imageInputRef} type="file" accept="image/*" className="hidden" onChange={handleImageUpload} />
                     {showAttachments && (
-                        <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar" className="hidden" onChange={handleFileUpload} multiple />
+                        <input ref={fileInputRef} type="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip,.rar,image/*" className="hidden" onChange={handleFileUpload} multiple />
                     )}
                 </div>
 
@@ -546,6 +570,10 @@ export function RichTextEditor({
                 <ScrollArea className="flex-1" style={{ minHeight }}>
                     <EditorContent editor={editor} className="[&_.tiptap]:outline-none [&_.tiptap]:min-h-[inherit] [&_.tiptap_p.is-empty::before]:text-muted-foreground/50 [&_.tiptap_p.is-empty::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-empty::before]:pointer-events-none [&_.tiptap_p.is-empty::before]:float-left [&_.tiptap_p.is-empty::before]:h-0" />
                 </ScrollArea>
+
+                {uploading > 0 && (
+                    <div className="border-t px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">Uploading…</div>
+                )}
 
                 {/* Attachments */}
                 {showAttachments && attachments.length > 0 && (

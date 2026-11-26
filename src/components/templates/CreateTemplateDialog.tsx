@@ -12,6 +12,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { RichTextEditor, type Attachment } from "@/components/email/RichTextEditor";
+import { AiImagePanel } from "@/components/templates/AiImagePanel";
+import { formatBytes, type UploadedFile } from "@/lib/files";
 import { cn } from "@/lib/utils";
 
 interface TemplateData {
@@ -20,6 +22,7 @@ interface TemplateData {
     subject: string;
     description: string;
     body?: string;
+    attachments?: UploadedFile[];
 }
 
 interface CreateTemplateDialogProps {
@@ -31,6 +34,7 @@ interface CreateTemplateDialogProps {
         subject: string;
         description: string;
         body: string;
+        attachmentIds: string[];
     }) => void;
     editTemplate?: TemplateData | null;
 }
@@ -42,8 +46,9 @@ const variableGroups = [
         label: "Recipient",
         accent: "text-blue-600 dark:text-blue-400",
         items: [
-            { value: "[Employee Name]", description: 'Their name — or "team" for multiple' },
+            { value: "[Name]", description: 'Their name — or "team" for multiple' },
             { value: "[Job Title]", description: "Their role from your contacts" },
+            { value: "[Company]", description: "Their company from your contacts" },
             { value: "[Email]", description: "Their email address" },
         ],
     },
@@ -122,12 +127,23 @@ export const CreateTemplateDialog = ({
             setSubject(editTemplate.subject);
             setDescription(editTemplate.description);
             setBody(editTemplate.body ?? "");
+            setAttachments(
+                (editTemplate.attachments ?? []).map((a) => ({
+                    id: a.id,
+                    name: a.filename,
+                    size: formatBytes(a.size),
+                    type: a.contentType,
+                    isImage: a.contentType.startsWith("image/"),
+                    preview: a.contentType.startsWith("image/") ? a.url : undefined,
+                }))
+            );
             setEditorKey((k) => k + 1);
         } else if (open && !editTemplate) {
             setName("");
             setSubject("");
             setDescription("");
             setBody("");
+            setAttachments([]);
             setEditorKey((k) => k + 1);
         }
     }, [open, editTemplate]);
@@ -148,6 +164,14 @@ export const CreateTemplateDialog = ({
         editorInstance?.chain().focus().insertContent(variable).run();
     };
 
+    const handleInsertImage = (image: UploadedFile) => {
+        editorInstance
+            ?.chain()
+            .focus()
+            .setImage({ src: image.url, alt: image.filename, width: 480 } as { src: string; alt: string })
+            .run();
+    };
+
     const handleSubmit = (e?: React.FormEvent) => {
         e?.preventDefault();
         if (!isValid) return;
@@ -157,6 +181,7 @@ export const CreateTemplateDialog = ({
             subject: subject.trim(),
             description: description.trim(),
             body,
+            attachmentIds: attachments.flatMap((a) => (a.id ? [a.id] : [])),
         });
         onOpenChange(false);
     };
@@ -236,6 +261,9 @@ export const CreateTemplateDialog = ({
                             <VariablePicker onInsert={handleInsertVariable} />
                         </div>
                         <div className="flex-1 flex flex-col overflow-hidden px-6 pb-3">
+                            <div className="mb-2.5">
+                                <AiImagePanel onInsert={handleInsertImage} />
+                            </div>
                             <div className="flex-1 min-h-0">
                                 <RichTextEditor
                                     key={editorKey}
@@ -243,10 +271,10 @@ export const CreateTemplateDialog = ({
                                     onChange={setBody}
                                     attachments={attachments}
                                     onAttachmentsChange={setAttachments}
-                                    showAttachments={false}
+                                    showAttachments
                                     compact
                                     minHeight="100%"
-                                    placeholder="Start writing… variables like [Employee Name] highlight as you type."
+                                    placeholder="Start writing… variables like [Name] highlight as you type."
                                     onReady={setEditorInstance}
                                 />
                             </div>

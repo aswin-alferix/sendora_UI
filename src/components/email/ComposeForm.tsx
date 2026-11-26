@@ -16,6 +16,7 @@ import { RichTextEditor, type Attachment } from "@/components/email/RichTextEdit
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
 import { AUTO_PLACEHOLDER_KEYS, extractPlaceholders } from "@/lib/mail/substitute";
 import { apiErrorMessage } from "@/contexts/AuthContext";
+import { formatBytes, type UploadedFile } from "@/lib/files";
 
 const emailListSchema = z
     .string()
@@ -72,11 +73,22 @@ interface ComposeFormProps {
     initialTo?: string;
     initialSubject?: string;
     initialBody?: string;
+    /** Files from the chosen template, sent as attachments. */
+    initialAttachments?: UploadedFile[];
 }
 
-export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBody }: ComposeFormProps) {
+export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBody, initialAttachments }: ComposeFormProps) {
     const { toast } = useToast();
-    const [attachments, setAttachments] = useState<Attachment[]>([]);
+    const [attachments, setAttachments] = useState<Attachment[]>(() =>
+        (initialAttachments ?? []).map((a) => ({
+            id: a.id,
+            name: a.filename,
+            size: formatBytes(a.size),
+            type: a.contentType,
+            isImage: a.contentType.startsWith("image/"),
+            preview: a.contentType.startsWith("image/") ? a.url : undefined,
+        }))
+    );
     const [showCcBcc, setShowCcBcc] = useState(false);
     const [scheduleOpen, setScheduleOpen] = useState(false);
     const [editorKey, setEditorKey] = useState(0);
@@ -186,6 +198,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             scheduledAt: scheduledIso,
             sendSeparately: data.sendSeparately,
             customVariables: Object.keys(filteredCustom).length ? filteredCustom : undefined,
+            attachmentIds: attachments.flatMap((a) => (a.id ? [a.id] : [])),
         };
 
         if (config.provider === "resend") payload.apiKey = config.resendApiKey;

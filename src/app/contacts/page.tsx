@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, ChevronLeft, ChevronRight, X, SlidersHorizontal, Settings2, FilterX } from "lucide-react";
+import { Plus, Search, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, ChevronLeft, ChevronRight, X, SlidersHorizontal, Settings2, FilterX, Share2 } from "lucide-react";
 
 import { EmptyState } from "@/components/shared/EmptyState";
 import { Button } from "@/components/ui/button";
@@ -58,6 +58,8 @@ import { ContactDialog } from "@/components/contacts/ContactDialog";
 import { RolesManagementDialog } from "@/components/contacts/RolesManagementDialog";
 import { BulkGroupsManagementDialog } from "@/components/contacts/BulkGroupsManagementDialog";
 import { ContactDetailDrawer } from "@/components/contacts/ContactDetailDrawer";
+import { ShareContactsDialog } from "@/components/contacts/ShareContactsDialog";
+import { apiErrorMessage } from "@/contexts/AuthContext";
 import { TopBarActions } from "@/components/layout/TopBarActions";
 import { useToast } from "@/hooks/use-toast";
 import { usePagination } from "@/hooks/usePagination";
@@ -88,6 +90,7 @@ const defaultRoles: ContactRole[] = [
     { id: "2", name: "Client", isDefault: true },
     { id: "3", name: "Contractor", isDefault: true },
     { id: "4", name: "Consultant", isDefault: true },
+    { id: "5", name: "Others", isDefault: true },
 ];
 
 const defaultBulkGroups: BulkGroup[] = [];
@@ -151,6 +154,7 @@ export default function ContactsPage() {
     const [contactsLoading, setContactsLoading] = useState(true);
     const [roles, setRoles] = useState<ContactRole[]>(defaultRoles);
     const [bulkGroups, setBulkGroups] = useState<BulkGroup[]>(defaultBulkGroups);
+    const [reloadKey, setReloadKey] = useState(0);
 
     // Load contacts + derive groups from server
     useEffect(() => {
@@ -181,7 +185,7 @@ export default function ContactsPage() {
             }
         })();
         return () => { cancelled = true; };
-    }, []);
+    }, [reloadKey]);
     const [searchQuery, setSearchQuery] = useState("");
     const [companyFilter, setCompanyFilter] = useState<string>("all");
     const [roleFilter, setRoleFilter] = useState<string>("all");
@@ -203,6 +207,8 @@ export default function ContactsPage() {
     const [editingGroupInFilter, setEditingGroupInFilter] = useState<string | null>(null);
     const [editGroupName, setEditGroupName] = useState("");
     const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
+    const [shareDialogOpen, setShareDialogOpen] = useState(false);
+    const [importing, setImporting] = useState(false);
     const importInputRef = useRef<HTMLInputElement>(null);
     const { toast } = useToast();
     const router = useRouter();
@@ -232,56 +238,51 @@ export default function ContactsPage() {
     const roleOptions = useMemo(() => roles.map((r) => r.name), [roles]);
     const groupOptions = useMemo(() => bulkGroups.map((g) => g.name), [bulkGroups]);
 
-    const handleExportCsv = () => {
-        const headers = ["Name", "Email", "Company", "Role", "Groups", "Total Emails"];
-        const rows = contacts.map((c) => [
-            c.name, c.email, c.company, c.role, c.groups.join(";"), String(c.totalEmails),
-        ]);
-        const csv = [headers, ...rows]
-            .map((row) => row.map((cell) => `"${cell.replace(/"/g, '""')}"`).join(","))
-            .join("\n");
-        const blob = new Blob([csv], { type: "text/csv" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = "contacts.csv";
-        a.click();
-        URL.revokeObjectURL(url);
-        toast({ title: "Contacts exported", description: `${contacts.length} contacts exported to CSV.` });
+    const handleExport = async (format: "xlsx" | "csv") => {
+        try {
+            const res = await fetch(`/api/contacts/export?format=${format}`);
+            if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), "Export failed"));
+            const blob = await res.blob();
+            const disposition = res.headers.get("Content-Disposition") ?? "";
+            const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `contacts.${format}`;
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = filename;
+            a.click();
+            URL.revokeObjectURL(url);
+            toast({ title: "Contacts exported", description: `${contacts.length} contacts exported to ${format === "xlsx" ? "Excel" : "CSV"}.` });
+        } catch (err) {
+            toast({ title: "Export failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+        }
     };
 
-    const handleImportCsv = (e: React.ChangeEvent<HTMLInputElement>) => {
+    // Import runs on the server (CSV or Excel). Existing emails are skipped, not overwritten.
+    const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (!file) return;
-        const reader = new FileReader();
-        reader.onload = (ev) => {
-            try {
-                const text = ev.target?.result as string;
-                const lines = text.split("\n").filter(Boolean);
-                const imported: Contact[] = lines.slice(1).map((line, i) => {
-                    const cols = line.split(",").map((c) => c.replace(/^"|"$/g, "").replace(/""/g, '"'));
-                    return {
-                        id: `imported-${Date.now()}-${i}`,
-                        name: cols[0] ?? "",
-                        email: cols[1] ?? "",
-                        company: cols[2] ?? "",
-                        role: cols[3] ?? roleOptions[0] ?? "",
-                        groups: cols[4] ? cols[4].split(";").filter(Boolean) : [],
-                        totalEmails: parseInt(cols[5] ?? "0", 10) || 0,
-                    };
-                }).filter((c) => c.name && c.email);
-                setContacts((prev) => {
-                    const existingEmails = new Set(prev.map((c) => c.email));
-                    const newOnes = imported.filter((c) => !existingEmails.has(c.email));
-                    return [...prev, ...newOnes];
-                });
-                toast({ title: "Contacts imported", description: `${imported.length} contacts imported successfully.` });
-            } catch {
-                toast({ title: "Import failed", description: "Could not parse the CSV file." });
-            }
-        };
-        reader.readAsText(file);
         e.target.value = "";
+        if (!file) return;
+        setImporting(true);
+        try {
+            const form = new FormData();
+            form.append("file", file);
+            const res = await fetch("/api/contacts/import?mode=skip", { method: "POST", body: form });
+            const data = await res.json().catch(() => ({}));
+            if (!res.ok) throw new Error(apiErrorMessage(data, "Could not import the file."));
+            const invalid: { row: number; reason: string }[] = data.invalid ?? [];
+            const parts = [`${data.created} added`];
+            if (data.skipped) parts.push(`${data.skipped} already existed`);
+            if (invalid.length) {
+                const sample = invalid.slice(0, 3).map((r) => `row ${r.row}: ${r.reason}`).join("; ");
+                parts.push(`${invalid.length} skipped as invalid (${sample}${invalid.length > 3 ? "; …" : ""})`);
+            }
+            toast({ title: "Contacts imported", description: parts.join(", ") + ".", variant: invalid.length ? undefined : "success" });
+            setReloadKey((k) => k + 1);
+        } catch (err) {
+            toast({ title: "Import failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+        } finally {
+            setImporting(false);
+        }
     };
 
     // Keyboard shortcuts
@@ -788,17 +789,21 @@ export default function ContactsPage() {
                                     <span className="ml-auto text-xs text-muted-foreground tabular-nums">{bulkGroups.length}</span>
                                 </DropdownMenuItem>
                                 <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={handleExportCsv}>
+                                <DropdownMenuItem onClick={() => handleExport("xlsx")}>
+                                    <Download className="w-4 h-4 mr-2" />
+                                    Export Excel
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleExport("csv")}>
                                     <Download className="w-4 h-4 mr-2" />
                                     Export CSV
                                 </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => importInputRef.current?.click()}>
+                                <DropdownMenuItem disabled={importing} onClick={() => importInputRef.current?.click()}>
                                     <Upload className="w-4 h-4 mr-2" />
-                                    Import CSV
+                                    {importing ? "Importing…" : "Import CSV / Excel"}
                                 </DropdownMenuItem>
                             </DropdownMenuContent>
                         </DropdownMenu>
-                        <input ref={importInputRef} type="file" accept=".csv" className="hidden" onChange={handleImportCsv} />
+                        <input ref={importInputRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={handleImport} />
                         <TooltipProvider>
                             <Tooltip>
                                 <TooltipTrigger asChild>
@@ -1199,6 +1204,16 @@ export default function ContactsPage() {
 
                                 <Tooltip>
                                     <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-background/10 text-background hover:text-background gap-1.5" onClick={() => setShareDialogOpen(true)}>
+                                            <Share2 className="w-3.5 h-3.5" />
+                                            <span className="hidden sm:inline">Share</span>
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Send a copy to another admin</p></TooltipContent>
+                                </Tooltip>
+
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
                                         <Button variant="ghost" size="sm" className="h-8 px-3 text-xs hover:bg-destructive/20 text-background hover:text-destructive-foreground gap-1.5" onClick={handleBulkDeleteClick}>
                                             <Trash2 className="w-3.5 h-3.5" />
                                             <span className="hidden sm:inline">Delete</span>
@@ -1241,6 +1256,15 @@ export default function ContactsPage() {
                 onDeleteRole={handleDeleteRole}
                 getRoleContactCount={getRoleContactCount}
             />
+
+            {shareDialogOpen && (
+                <ShareContactsDialog
+                    open={shareDialogOpen}
+                    onOpenChange={setShareDialogOpen}
+                    contactIds={Array.from(selectedContacts)}
+                    onShared={() => setSelectedContacts(new Set())}
+                />
+            )}
 
             <BulkGroupsManagementDialog
                 open={groupsDialogOpen}

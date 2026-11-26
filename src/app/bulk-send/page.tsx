@@ -56,6 +56,7 @@ import {
     substitute,
     appendSignatureIfMissing,
 } from "@/lib/mail/substitute";
+import type { UploadedFile } from "@/lib/files";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -74,6 +75,7 @@ interface TemplateItem {
     subject: string;
     description: string;
     body: string;
+    attachments: UploadedFile[];
 }
 
 interface Recipient {
@@ -195,6 +197,7 @@ function BulkSendContent() {
                         subject: t.subject,
                         description: t.description ?? "",
                         body: t.body ?? "",
+                        attachments: t.attachments ?? [],
                     }))
                 );
                 setContacts(
@@ -411,6 +414,7 @@ function BulkSendContent() {
             html: template.body,
             sendSeparately: true,
             customVariables: Object.keys(filledCustom).length ? filledCustom : undefined,
+            attachmentIds: template.attachments.map((a) => a.id),
             ...buildProviderFields(mailConfig),
         };
 
@@ -543,6 +547,12 @@ function BulkSendContent() {
                                             <span className="font-medium text-foreground">Subject:</span> {template.subject}
                                         </p>
                                         {template.description && <p>{template.description}</p>}
+                                        {template.attachments.length > 0 && (
+                                            <p>
+                                                <span className="font-medium text-foreground">Attachments:</span>{" "}
+                                                {template.attachments.map((a) => a.filename).join(", ")}
+                                            </p>
+                                        )}
                                     </div>
                                 )}
                             </>
