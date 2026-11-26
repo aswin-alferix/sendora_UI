@@ -31,7 +31,7 @@ function ComposeContent() {
     const [template] = useState(readPendingTemplate);
 
     return (
-        <div className="px-4 py-6 md:px-8">
+        <div className="flex min-h-[calc(100dvh-4rem)] flex-col px-4 py-6 md:px-8">
             <PageHeader
                 icon={Mail}
                 title="Compose Email"

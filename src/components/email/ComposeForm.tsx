@@ -451,7 +451,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
             onSubmit={handleSubmit(onSubmit)}
-            className="bg-card rounded-2xl border border-border shadow-card"
+            className="flex flex-1 flex-col bg-card rounded-2xl border border-border shadow-card"
         >
             {/* ─── Header: From · Send separately · Discard (Outlook style) ─── */}
             <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
@@ -500,7 +500,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                 </div>
             </div>
 
-            <div className="space-y-4 p-5">
+            <div className="flex flex-1 flex-col space-y-4 p-5">
                 {/* ─── Recipients + subject: label buttons and underline fields ─── */}
                 <div className="space-y-2.5">
                     <RecipientRow
@@ -711,8 +711,8 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                     </motion.div>
                 )}
 
-                {/* Body — Tiptap rich editor */}
-                <div className="space-y-1.5">
+                {/* Body — Tiptap rich editor (takes the remaining height) */}
+                <div className="flex flex-1 flex-col space-y-1.5">
                     <Controller
                         name="body"
                         control={control}
@@ -724,6 +724,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                                 attachments={attachments}
                                 onAttachmentsChange={setAttachments}
                                 minHeight="240px"
+                                fill
                                 placeholder="Write your email message here..."
                             />
                         )}

@@ -105,6 +105,8 @@ interface RichTextEditorProps {
     onReady?: (editor: Editor) => void;
     /** Compact mode: thin single-row toolbar with only the essentials (bold/italic/lists/link). */
     compact?: boolean;
+    /** Grow to fill the parent (a flex column); the writing area takes all spare height. */
+    fill?: boolean;
 }
 
 /**
@@ -182,6 +184,7 @@ export function RichTextEditor({
     onInsertSignature,
     onReady,
     compact = false,
+    fill = false,
 }: RichTextEditorProps) {
     const imageInputRef = useRef<HTMLInputElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
@@ -354,7 +357,7 @@ export function RichTextEditor({
 
     return (
         <TooltipProvider delayDuration={300}>
-            <div className="rounded-lg border border-border bg-card flex flex-col overflow-hidden">
+            <div className={cn("rounded-lg border border-border bg-card flex flex-col overflow-hidden", fill && "flex-1")}>
 
                 {/* ─── Single-row toolbar (grouped: history · text · alignment · lists · insert · clear) */}
                 <div className="flex items-center gap-0.5 px-2 py-1.5 border-b border-border bg-muted/40 flex-wrap">
@@ -573,10 +576,15 @@ export function RichTextEditor({
                 </div>
 
                 {/* Editor area */}
-                <div className="flex-1 overflow-x-hidden" style={{ minHeight }}>
+                <div className={cn("flex-1 overflow-x-hidden", fill && "flex flex-col")} style={{ minHeight }}>
                     <EditorContent
                         editor={editor}
-                        className={cn(EDITOR_CONTENT_CLASSES, "min-h-[inherit] [&_.tiptap]:min-h-[inherit]")}
+                        className={cn(
+                            EDITOR_CONTENT_CLASSES,
+                            "min-h-[inherit] [&_.tiptap]:min-h-[inherit]",
+                            // the whole box is clickable/typeable, not just the first 240px
+                            fill && "flex flex-1 flex-col [&_.tiptap]:flex-1"
+                        )}
                     />
                 </div>
 
