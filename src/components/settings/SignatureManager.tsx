@@ -202,7 +202,7 @@ export function SignatureManager() {
         <div className="space-y-4">
             <div className="flex items-start justify-between gap-4">
                 <div>
-                    <h3 className="text-heading-4 font-heading mb-1">Email Signatures</h3>
+                    <h3 className="text-base font-semibold mb-1">Email Signatures</h3>
                     <p className="text-body-sm text-muted-foreground">
                         Save multiple signatures (e.g. one for new mail, one for replies). The default is appended automatically.
                     </p>

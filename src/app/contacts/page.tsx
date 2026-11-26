@@ -3,13 +3,15 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Search, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, ChevronLeft, ChevronRight, X, SlidersHorizontal, Settings2, FilterX, Share2 } from "lucide-react";
+import { Plus, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, X, Settings2, Share2 } from "lucide-react";
 
-import { EmptyState } from "@/components/shared/EmptyState";
+import { PageHeader } from "@/components/shared/PageHeader";
+import { PlayOnceImage } from "@/components/shared/PlayOnceImage";
+import { DataTable, type DataTableColumn } from "@/components/shared/data-table/DataTable";
+import { ActiveFilterChips, ClearFiltersButton, FilterMenu, type FilterCategory } from "@/components/shared/data-table/FilterMenu";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Checkbox } from "@/components/ui/checkbox";
 import {
     Tooltip,
     TooltipContent,
@@ -24,11 +26,6 @@ import {
     DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-    Popover,
-    PopoverContent,
-    PopoverTrigger,
-} from "@/components/ui/popover";
-import {
     Command,
     CommandEmpty,
     CommandGroup,
@@ -37,13 +34,6 @@ import {
     CommandList,
     CommandSeparator,
 } from "@/components/ui/command";
-import {
-    Select,
-    SelectContent,
-    SelectItem,
-    SelectTrigger,
-    SelectValue,
-} from "@/components/ui/select";
 import {
     AlertDialog,
     AlertDialogAction,
@@ -55,14 +45,13 @@ import {
     AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ContactDialog } from "@/components/contacts/ContactDialog";
+import { AddContactsDialog, type AddContactsResult, type NewContact } from "@/components/contacts/AddContactsDialog";
 import { RolesManagementDialog } from "@/components/contacts/RolesManagementDialog";
 import { BulkGroupsManagementDialog } from "@/components/contacts/BulkGroupsManagementDialog";
 import { ContactDetailDrawer } from "@/components/contacts/ContactDetailDrawer";
 import { ShareContactsDialog } from "@/components/contacts/ShareContactsDialog";
 import { apiErrorMessage } from "@/contexts/AuthContext";
-import { TopBarActions } from "@/components/layout/TopBarActions";
 import { useToast } from "@/hooks/use-toast";
-import { usePagination } from "@/hooks/usePagination";
 
 interface ContactRole {
     id: string;
@@ -116,29 +105,6 @@ const getGroupColor = (groupName: string) => {
     return groupColors[index];
 };
 
-function FilterChip({
-    icon: Icon,
-    label,
-    onRemove,
-}: {
-    icon: (props: { className?: string }) => React.ReactNode;
-    label: string;
-    onRemove: () => void;
-}) {
-    return (
-        <span className="inline-flex items-center gap-1.5 pl-2 pr-1 py-1 rounded-full bg-accent text-accent-foreground text-xs font-medium border border-border">
-            <Icon className="w-3 h-3 opacity-70" />
-            <span className="max-w-[140px] truncate">{label}</span>
-            <button
-                onClick={onRemove}
-                className="rounded-full p-0.5 hover:bg-foreground/10 transition-colors"
-                aria-label={`Remove ${label} filter`}
-            >
-                <X className="w-3 h-3" />
-            </button>
-        </span>
-    );
-}
 
 // Avatar palette — restrained 4-tone cool family. Each name maps deterministically
 // to one of these so contacts feel related, not like a rainbow.
@@ -187,9 +153,10 @@ export default function ContactsPage() {
         return () => { cancelled = true; };
     }, [reloadKey]);
     const [searchQuery, setSearchQuery] = useState("");
-    const [companyFilter, setCompanyFilter] = useState<string>("all");
-    const [roleFilter, setRoleFilter] = useState<string>("all");
-    const [groupFilter, setGroupFilter] = useState<string>("all");
+    // Multi-select filters (empty set = no filter)
+    const [companyFilter, setCompanyFilter] = useState<Set<string>>(new Set());
+    const [roleFilter, setRoleFilter] = useState<Set<string>>(new Set());
+    const [groupFilter, setGroupFilter] = useState<Set<string>>(new Set());
     const [dialogOpen, setDialogOpen] = useState(false);
     const [editContact, setEditContact] = useState<Contact | null>(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -206,22 +173,18 @@ export default function ContactsPage() {
     const [groupToDelete, setGroupToDelete] = useState<string | null>(null);
     const [editingGroupInFilter, setEditingGroupInFilter] = useState<string | null>(null);
     const [editGroupName, setEditGroupName] = useState("");
-    const [filterPopoverOpen, setFilterPopoverOpen] = useState(false);
     const [shareDialogOpen, setShareDialogOpen] = useState(false);
     const [importing, setImporting] = useState(false);
     const importInputRef = useRef<HTMLInputElement>(null);
     const { toast } = useToast();
     const router = useRouter();
 
-    const activeFilterCount =
-        (companyFilter !== "all" ? 1 : 0) +
-        (roleFilter !== "all" ? 1 : 0) +
-        (groupFilter !== "all" ? 1 : 0);
+    const activeFilterCount = companyFilter.size + roleFilter.size + groupFilter.size;
 
     const clearAllFilters = () => {
-        setCompanyFilter("all");
-        setRoleFilter("all");
-        setGroupFilter("all");
+        setCompanyFilter(new Set());
+        setRoleFilter(new Set());
+        setGroupFilter(new Set());
         setSearchQuery("");
     };
 
@@ -330,19 +293,49 @@ export default function ContactsPage() {
             contact.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
             contact.email.toLowerCase().includes(searchQuery.toLowerCase()) ||
             contact.company.toLowerCase().includes(searchQuery.toLowerCase());
-        const matchesCompany = companyFilter === "all" || contact.company === companyFilter;
-        const matchesRole = roleFilter === "all" || contact.role === roleFilter;
-        const matchesGroup = groupFilter === "all" || contact.groups.includes(groupFilter);
+        const matchesCompany = companyFilter.size === 0 || companyFilter.has(contact.company);
+        const matchesRole = roleFilter.size === 0 || roleFilter.has(contact.role);
+        const matchesGroup = groupFilter.size === 0 || contact.groups.some((g) => groupFilter.has(g));
         return matchesSearch && matchesCompany && matchesRole && matchesGroup;
     });
 
-    const { page: contactPage, totalPages: contactTotalPages, paginatedItems: pagedContacts,
-        goNext: goContactNext, goPrev: goContactPrev, hasNext: hasContactNext, hasPrev: hasContactPrev,
-        from: contactFrom, to: contactTo, reset: resetContactPage } =
-        usePagination(filteredContacts, 10);
+    // ── Filter menu categories (value counts come from all contacts) ─────────
+    const countBy = (values: string[]) => {
+        const m = new Map<string, number>();
+        values.forEach((v) => v && m.set(v, (m.get(v) ?? 0) + 1));
+        return m;
+    };
+    const companyCounts = countBy(contacts.map((c) => c.company));
+    const roleCounts = countBy(contacts.map((c) => c.role));
+    const groupCounts = countBy(contacts.flatMap((c) => c.groups));
+    const filterCategories: FilterCategory[] = [
+        {
+            id: "company",
+            label: "Company",
+            icon: Building2,
+            options: companies.filter(Boolean).map((v) => ({ value: v, count: companyCounts.get(v) ?? 0 })),
+            selected: companyFilter,
+            onChange: setCompanyFilter,
+        },
+        {
+            id: "role",
+            label: "Role",
+            icon: UserCircle,
+            options: roleOptions.map((v) => ({ value: v, count: roleCounts.get(v) ?? 0 })),
+            selected: roleFilter,
+            onChange: setRoleFilter,
+        },
+        {
+            id: "group",
+            label: "Group",
+            icon: Tags,
+            options: groupOptions.map((v) => ({ value: v, count: groupCounts.get(v) ?? 0 })),
+            selected: groupFilter,
+            onChange: setGroupFilter,
+        },
+    ];
 
-    // Reset pagination when filters change
-    useEffect(() => { resetContactPage(); }, [searchQuery, companyFilter, roleFilter, groupFilter]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
     const getInitials = (name: string) => {
         return name
@@ -391,28 +384,7 @@ export default function ContactsPage() {
         setDeleteDialogOpen(false);
     };
 
-    const handleSelectContact = (contactId: string, checked: boolean) => {
-        setSelectedContacts((prev) => {
-            const next = new Set(prev);
-            if (checked) {
-                next.add(contactId);
-            } else {
-                next.delete(contactId);
-            }
-            return next;
-        });
-    };
-
-    const handleSelectAll = (checked: boolean) => {
-        if (checked) {
-            setSelectedContacts(new Set(filteredContacts.map((c) => c.id)));
-        } else {
-            setSelectedContacts(new Set());
-        }
-    };
-
-    const isAllSelected = filteredContacts.length > 0 && filteredContacts.every((c) => selectedContacts.has(c.id));
-    const isSomeSelected = filteredContacts.some((c) => selectedContacts.has(c.id));
+    // Row selection is handled by the shared DataTable (selectedIds / onSelectedIdsChange).
 
     const handleBulkDeleteClick = () => {
         setBulkDeleteDialogOpen(true);
@@ -536,6 +508,39 @@ export default function ContactsPage() {
         } catch (err) {
             toast({ title: "Save failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
         }
+    };
+
+    /** Multi-row "Add contacts": saves each row, reports which ones failed. */
+    const handleAddContacts = async (list: NewContact[]): Promise<AddContactsResult> => {
+        const results = await Promise.allSettled(
+            list.map(async (c) => {
+                const res = await fetch("/api/contacts", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(c),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) throw new Error(apiErrorMessage(data, "Couldn't save this contact"));
+                return data as Contact;
+            })
+        );
+        const created: Contact[] = [];
+        const failed: AddContactsResult["failed"] = [];
+        results.forEach((r, i) => {
+            if (r.status === "fulfilled") created.push(r.value);
+            else failed.push({ email: list[i].email, message: r.reason instanceof Error ? r.reason.message : String(r.reason) });
+        });
+        if (created.length) {
+            setContacts((prev) => [...created, ...prev]);
+            toast({
+                title: created.length === 1 ? "Contact added" : `${created.length} contacts added`,
+                description: failed.length ? `${failed.length} couldn't be saved. They're still open to fix.` : undefined,
+                variant: "success",
+            });
+        } else if (failed.length) {
+            toast({ title: "Nothing was saved", description: "Check the highlighted rows and try again.", variant: "destructive" });
+        }
+        return { failed };
     };
 
     // Role management
@@ -727,8 +732,11 @@ export default function ContactsPage() {
             const oldName = editingGroupInFilter;
             handleEditBulkGroup(group.id, editGroupName.trim());
             // Update the filter if the current filter was renamed
-            if (groupFilter === oldName) {
-                setGroupFilter(editGroupName.trim());
+            if (groupFilter.has(oldName)) {
+                const next = new Set(groupFilter);
+                next.delete(oldName);
+                next.add(editGroupName.trim());
+                setGroupFilter(next);
             }
         }
         setEditingGroupInFilter(null);
@@ -745,8 +753,10 @@ export default function ContactsPage() {
             const group = bulkGroups.find((g) => g.name === groupToDelete);
             if (group) {
                 handleDeleteBulkGroup(group.id);
-                if (groupFilter === groupToDelete) {
-                    setGroupFilter("all");
+                if (groupFilter.has(groupToDelete)) {
+                    const next = new Set(groupFilter);
+                    next.delete(groupToDelete);
+                    setGroupFilter(next);
                 }
             }
         }
@@ -754,385 +764,235 @@ export default function ContactsPage() {
         setDeleteGroupDialogOpen(false);
     };
 
+    const contactColumns: DataTableColumn<Contact>[] = [
+        {
+            id: "name",
+            header: "Contact",
+            hideable: false,
+            sortValue: (c) => c.name,
+            className: "min-w-[260px]",
+            cell: (contact) => {
+                const avatarColor = getAvatarColor(contact.name);
+                return (
+                    <div className="flex items-center gap-3 min-w-0">
+                        <Avatar className="h-8 w-8">
+                            <AvatarFallback className={`text-xs font-semibold ${avatarColor.bg} ${avatarColor.text}`}>
+                                {getInitials(contact.name)}
+                            </AvatarFallback>
+                        </Avatar>
+                        <div className="min-w-0">
+                            <p className="truncate font-semibold text-foreground">{contact.name}</p>
+                            <p className="truncate text-xs text-muted-foreground">{contact.email}</p>
+                        </div>
+                    </div>
+                );
+            },
+        },
+        {
+            id: "company",
+            header: "Company",
+            sortValue: (c) => c.company,
+            className: "min-w-[160px]",
+            cell: (c) => <span className="text-foreground">{c.company || "—"}</span>,
+        },
+        {
+            id: "role",
+            header: "Role",
+            sortValue: (c) => c.role,
+            cell: (c) =>
+                c.role ? (
+                    <span className="inline-flex items-center rounded-md border border-border bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+                        {c.role}
+                    </span>
+                ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                ),
+        },
+        {
+            id: "groups",
+            header: "Groups",
+            sortValue: (c) => c.groups.length,
+            className: "min-w-[180px]",
+            cell: (c) =>
+                c.groups.length > 0 ? (
+                    <div className="flex max-w-[260px] flex-wrap gap-1">
+                        {c.groups.map((group) => {
+                            const color = getGroupColor(group);
+                            return (
+                                <span key={group} className={`inline-flex items-center rounded-md px-2 py-0.5 text-xs font-semibold ${color.bg} ${color.text}`}>
+                                    {group}
+                                </span>
+                            );
+                        })}
+                    </div>
+                ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                ),
+        },
+        {
+            id: "emails",
+            header: "Emails",
+            sortValue: (c) => c.totalEmails,
+            className: "whitespace-nowrap",
+            cell: (c) => <span className="font-semibold tabular-nums">{c.totalEmails.toLocaleString()}</span>,
+        },
+    ];
+
     return (
         <>
-            <div className="p-4 md:p-8 max-w-7xl mx-auto pb-32">
-                {/* ── Header ───────────────────────────────────────────────── */}
-                <div className="flex flex-col sm:flex-row sm:items-end sm:justify-between gap-4 mb-8">
-                    <div>
-                        <h1 className="text-heading-2 font-heading text-foreground tracking-tight">Contacts</h1>
-                        <p className="text-body-sm text-muted-foreground mt-1">
-                            <span className="font-medium text-foreground">{contacts.length}</span> people
-                            <span className="mx-2 text-muted-foreground/40">·</span>
-                            <span className="font-medium text-foreground">{bulkGroups.length}</span> groups
-                            <span className="mx-2 text-muted-foreground/40">·</span>
-                            <span className="font-medium text-foreground">{contacts.reduce((s, c) => s + c.totalEmails, 0).toLocaleString()}</span> emails sent
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-2">
-                        <DropdownMenu>
-                            <DropdownMenuTrigger asChild>
-                                <Button variant="outline" size="default" className="h-10">
-                                    <Settings2 className="w-4 h-4" />
-                                    <span className="hidden sm:inline">Manage</span>
+            <div className={cn("flex h-[calc(100dvh-4rem)] min-h-[600px] flex-col px-4 py-6 md:px-8", selectedContacts.size > 0 && "pb-24")}>
+                <PageHeader
+                    icon={Users}
+                    title="Contacts"
+                    count={contacts.length}
+                    description={`${bulkGroups.length} groups · ${contacts.reduce((s, c) => s + c.totalEmails, 0).toLocaleString()} emails sent`}
+                    action={
+                        <>
+                                    <DropdownMenu>
+                                        <DropdownMenuTrigger asChild>
+                                            <Button variant="outline" className="h-9 rounded-lg bg-card shadow-sm">
+                                                <Settings2 className="w-4 h-4" />
+                                                <span className="hidden sm:inline">Manage</span>
+                                            </Button>
+                                        </DropdownMenuTrigger>
+                                        <DropdownMenuContent align="end" className="w-52">
+                                            <DropdownMenuItem onClick={() => setRolesDialogOpen(true)}>
+                                                <UserCircle className="w-4 h-4 mr-2" />
+                                                Roles
+                                                <span className="ml-auto text-xs text-muted-foreground tabular-nums">{roles.length}</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => setGroupsDialogOpen(true)}>
+                                                <Tags className="w-4 h-4 mr-2" />
+                                                Groups
+                                                <span className="ml-auto text-xs text-muted-foreground tabular-nums">{bulkGroups.length}</span>
+                                            </DropdownMenuItem>
+                                            <DropdownMenuSeparator />
+                                            <DropdownMenuItem onClick={() => handleExport("xlsx")}>
+                                                <Download className="w-4 h-4 mr-2" />
+                                                Export Excel
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleExport("csv")}>
+                                                <Download className="w-4 h-4 mr-2" />
+                                                Export CSV
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem disabled={importing} onClick={() => importInputRef.current?.click()}>
+                                                <Upload className="w-4 h-4 mr-2" />
+                                                {importing ? "Importing…" : "Import CSV / Excel"}
+                                            </DropdownMenuItem>
+                                        </DropdownMenuContent>
+                                    </DropdownMenu>
+                                    <input ref={importInputRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={handleImport} />
+                                    <TooltipProvider>
+                                        <Tooltip>
+                                            <TooltipTrigger asChild>
+                                                <Button onClick={handleAddContact} className="h-9 rounded-lg">
+                                                    <Plus className="w-4 h-4" />
+                                                    Add Contact
+                                                </Button>
+                                            </TooltipTrigger>
+                                            <TooltipContent side="bottom">
+                                                <p className="text-xs">Add new contact <kbd className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-muted rounded border">Ctrl+N</kbd></p>
+                                            </TooltipContent>
+                                        </Tooltip>
+                                    </TooltipProvider>
+                        </>
+                    }
+                />
+
+                <DataTable
+                    data={filteredContacts}
+                    columns={contactColumns}
+                    getRowId={(c) => c.id}
+                    itemLabel="contacts"
+                    loading={contactsLoading}
+                    search={searchQuery}
+                    onSearchChange={setSearchQuery}
+                    searchPlaceholder="Search by name, email, or company…"
+                    selectable
+                    selectedIds={selectedContacts}
+                    onSelectedIdsChange={setSelectedContacts}
+                    showSelectionCount={false}
+                    onRowClick={(c) => setDrawerContact(c)}
+                    filters={
+                            <FilterMenu categories={filterCategories} onClearAll={clearAllFilters} />
+                    }
+                    afterColumns={activeFilterCount > 0 ? <ClearFiltersButton onClick={clearAllFilters} /> : undefined}
+                    subToolbar={
+                        <ActiveFilterChips categories={filterCategories}>
+                            {groupFilter.size === 1 && (
+                                <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-7 gap-1.5 text-xs text-primary hover:bg-accent hover:text-primary"
+                                    onClick={() => handleEmailGroup([...groupFilter][0])}
+                                >
+                                    <Mail className="w-3 h-3" />
+                                    Email this group
                                 </Button>
-                            </DropdownMenuTrigger>
-                            <DropdownMenuContent align="end" className="w-52">
-                                <DropdownMenuItem onClick={() => setRolesDialogOpen(true)}>
-                                    <UserCircle className="w-4 h-4 mr-2" />
-                                    Roles
-                                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">{roles.length}</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setGroupsDialogOpen(true)}>
-                                    <Tags className="w-4 h-4 mr-2" />
-                                    Groups
-                                    <span className="ml-auto text-xs text-muted-foreground tabular-nums">{bulkGroups.length}</span>
-                                </DropdownMenuItem>
-                                <DropdownMenuSeparator />
-                                <DropdownMenuItem onClick={() => handleExport("xlsx")}>
-                                    <Download className="w-4 h-4 mr-2" />
-                                    Export Excel
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => handleExport("csv")}>
-                                    <Download className="w-4 h-4 mr-2" />
-                                    Export CSV
-                                </DropdownMenuItem>
-                                <DropdownMenuItem disabled={importing} onClick={() => importInputRef.current?.click()}>
-                                    <Upload className="w-4 h-4 mr-2" />
-                                    {importing ? "Importing…" : "Import CSV / Excel"}
-                                </DropdownMenuItem>
-                            </DropdownMenuContent>
-                        </DropdownMenu>
-                        <input ref={importInputRef} type="file" accept=".csv,.xlsx" className="hidden" onChange={handleImport} />
-                        <TooltipProvider>
-                            <Tooltip>
-                                <TooltipTrigger asChild>
-                                    <Button onClick={handleAddContact} className="h-10 shadow-primary">
-                                        <Plus className="w-4 h-4" />
-                                        Add Contact
-                                    </Button>
-                                </TooltipTrigger>
-                                <TooltipContent side="bottom">
-                                    <p className="text-xs">Add new contact <kbd className="ml-1.5 px-1.5 py-0.5 text-[10px] bg-muted rounded border">Ctrl+N</kbd></p>
-                                </TooltipContent>
-                            </Tooltip>
-                        </TooltipProvider>
-                        <TopBarActions />
-                    </div>
-                </div>
-
-                {/* ── Hero search + Filter pivot ───────────────────────────── */}
-                <motion.div
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="flex items-center gap-3 mb-3"
-                >
-                    <div className="relative flex-1">
-                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                        <Input
-                            placeholder="Search by name, email, or company…"
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-11 pr-10 h-11 bg-card border-border shadow-card focus-visible:ring-1"
-                        />
-                        {searchQuery && (
-                            <button
-                                onClick={() => setSearchQuery("")}
-                                className="absolute right-3 top-1/2 -translate-y-1/2 rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-                                aria-label="Clear search"
-                            >
-                                <X className="w-3.5 h-3.5" />
-                            </button>
-                        )}
-                    </div>
-
-                    <Popover open={filterPopoverOpen} onOpenChange={setFilterPopoverOpen}>
-                        <PopoverTrigger asChild>
-                            <Button variant="outline" className="h-11 gap-2 relative whitespace-nowrap">
-                                <SlidersHorizontal className="w-4 h-4" />
-                                Filter
-                                {activeFilterCount > 0 && (
-                                    <span className="ml-1 inline-flex items-center justify-center min-w-[20px] h-5 px-1.5 rounded-full bg-primary text-primary-foreground text-[11px] font-semibold tabular-nums">
-                                        {activeFilterCount}
-                                    </span>
-                                )}
-                            </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-[320px] p-4" align="end">
-                            <div className="flex items-center justify-between mb-4">
-                                <p className="text-sm font-medium">Refine results</p>
-                                {activeFilterCount > 0 && (
-                                    <button
-                                        onClick={clearAllFilters}
-                                        className="text-xs text-primary hover:underline flex items-center gap-1"
-                                    >
-                                        <FilterX className="w-3 h-3" /> Clear all
-                                    </button>
-                                )}
-                            </div>
-                            <div className="space-y-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Company</label>
-                                    <Select value={companyFilter} onValueChange={setCompanyFilter}>
-                                        <SelectTrigger className="w-full">
-                                            <Building2 className="w-4 h-4 mr-2 text-muted-foreground" />
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">All companies</SelectItem>
-                                            {companies.map((company) => (
-                                                <SelectItem key={company} value={company}>{company}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Role</label>
-                                    <Select value={roleFilter} onValueChange={setRoleFilter}>
-                                        <SelectTrigger className="w-full">
-                                            <UserCircle className="w-4 h-4 mr-2 text-muted-foreground" />
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">All roles</SelectItem>
-                                            {roleOptions.map((role) => (
-                                                <SelectItem key={role} value={role}>{role}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Group</label>
-                                    <Select value={groupFilter} onValueChange={setGroupFilter}>
-                                        <SelectTrigger className="w-full">
-                                            <Tags className="w-4 h-4 mr-2 text-muted-foreground" />
-                                            <SelectValue />
-                                        </SelectTrigger>
-                                        <SelectContent>
-                                            <SelectItem value="all">All groups</SelectItem>
-                                            {groupOptions.map((group) => (
-                                                <SelectItem key={group} value={group}>{group}</SelectItem>
-                                            ))}
-                                        </SelectContent>
-                                    </Select>
-                                </div>
-                            </div>
-                        </PopoverContent>
-                    </Popover>
-                </motion.div>
-
-                {/* ── Active filter chips + result counter ─────────────────── */}
-                <div className="flex items-center justify-between gap-3 mb-4 min-h-[28px]">
-                    <div className="flex flex-wrap items-center gap-2">
-                        {activeFilterCount > 0 && (
-                            <>
-                                {companyFilter !== "all" && (
-                                    <FilterChip icon={Building2} label={companyFilter} onRemove={() => setCompanyFilter("all")} />
-                                )}
-                                {roleFilter !== "all" && (
-                                    <FilterChip icon={UserCircle} label={roleFilter} onRemove={() => setRoleFilter("all")} />
-                                )}
-                                {groupFilter !== "all" && (
-                                    <FilterChip icon={Tags} label={groupFilter} onRemove={() => setGroupFilter("all")} />
-                                )}
-                                <button onClick={clearAllFilters} className="text-xs text-muted-foreground hover:text-foreground transition-colors">
-                                    Clear all
-                                </button>
-                            </>
-                        )}
-                    </div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                        {groupFilter !== "all" && (
-                            <Button variant="ghost" size="sm" className="h-7 text-xs gap-1.5 text-primary hover:text-primary hover:bg-accent" onClick={() => handleEmailGroup(groupFilter)}>
-                                <Mail className="w-3 h-3" />
-                                Email this group
-                            </Button>
-                        )}
-                        <span>{filteredContacts.length} {filteredContacts.length === 1 ? "result" : "results"}</span>
-                    </div>
-                </div>
-
-                {/* ── Contacts Table ───────────────────────────────────────── */}
-                {filteredContacts.length > 0 ? (
-                    <motion.div
-                        initial={{ opacity: 0, y: 8 }}
-                        animate={{ opacity: 1, y: 0 }}
-                        transition={{ delay: 0.05 }}
-                        className="bg-card rounded-xl border border-border shadow-card overflow-hidden"
-                    >
-                        <div className="overflow-x-auto">
-                            <table className="w-full table-fixed">
-                                <colgroup>
-                                    <col className="w-12" />
-                                    <col className="w-[26%]" />
-                                    <col className="w-[16%]" />
-                                    <col className="w-[12%]" />
-                                    <col />
-                                    <col className="w-[110px]" />
-                                    <col className="w-[140px]" />
-                                </colgroup>
-                                <thead>
-                                    <tr className="border-b border-border bg-muted/40">
-                                        <th className="px-4 py-3">
-                                            <Checkbox
-                                                checked={isAllSelected}
-                                                onCheckedChange={(checked) => handleSelectAll(checked as boolean)}
-                                                aria-label="Select all contacts"
-                                                className={isSomeSelected && !isAllSelected ? "data-[state=checked]:bg-primary/50" : ""}
-                                            />
-                                        </th>
-                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Contact</th>
-                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Company</th>
-                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Role</th>
-                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Groups</th>
-                                        <th className="text-left text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Emails</th>
-                                        <th className="text-right text-[11px] font-semibold text-muted-foreground uppercase tracking-wider px-4 py-3">Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    {pagedContacts.map((contact) => {
-                                        const isSelected = selectedContacts.has(contact.id);
-                                        const avatarColor = getAvatarColor(contact.name);
-                                        return (
-                                            <motion.tr
-                                                key={contact.id}
-                                                initial={{ opacity: 0 }}
-                                                animate={{ opacity: 1 }}
-                                                onClick={() => setDrawerContact(contact)}
-                                                className={`group/row border-b border-border last:border-b-0 transition-colors cursor-pointer ${isSelected ? "bg-primary/[0.06]" : "hover:bg-muted/40"}`}
-                                            >
-                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                                    <Checkbox
-                                                        checked={isSelected}
-                                                        onCheckedChange={(checked) => handleSelectContact(contact.id, checked as boolean)}
-                                                        aria-label={`Select ${contact.name}`}
-                                                    />
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <div className="flex items-center gap-3">
-                                                        <Avatar className="h-9 w-9 ring-2 ring-background">
-                                                            <AvatarFallback className={`text-xs font-semibold ${avatarColor.bg} ${avatarColor.text}`}>
-                                                                {getInitials(contact.name)}
-                                                            </AvatarFallback>
-                                                        </Avatar>
-                                                        <div className="min-w-0">
-                                                            <p className="text-sm font-medium text-foreground truncate">{contact.name}</p>
-                                                            <p className="text-xs text-muted-foreground truncate">{contact.email}</p>
-                                                        </div>
-                                                    </div>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="text-sm text-foreground">{contact.company}</span>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-medium bg-muted text-muted-foreground border border-border">
-                                                        {contact.role}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    {contact.groups.length > 0 ? (
-                                                        <div className="flex flex-wrap gap-1 max-w-[220px]">
-                                                            {contact.groups.map((group) => {
-                                                                const color = getGroupColor(group);
-                                                                return (
-                                                                    <span
-                                                                        key={group}
-                                                                        className={`inline-flex items-center px-2 py-0.5 rounded-md text-[11px] font-semibold ${color.bg} ${color.text}`}
-                                                                    >
-                                                                        {group}
-                                                                    </span>
-                                                                );
-                                                            })}
-                                                        </div>
-                                                    ) : (
-                                                        <span className="text-xs text-muted-foreground/50">—</span>
-                                                    )}
-                                                </td>
-                                                <td className="px-4 py-3">
-                                                    <span className="text-sm font-semibold text-foreground tabular-nums">
-                                                        {contact.totalEmails.toLocaleString()}
-                                                    </span>
-                                                </td>
-                                                <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                                    <div className="flex items-center justify-end gap-0.5 text-muted-foreground">
-                                                        <TooltipProvider delayDuration={300}>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <Button variant="ghost" size="icon-sm" aria-label="Send email" onClick={() => handleSingleEmail(contact)} className="hover:text-primary">
-                                                                        <Mail className="w-4 h-4" />
-                                                                    </Button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent side="top"><p className="text-xs">Send email</p></TooltipContent>
-                                                            </Tooltip>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <Button variant="ghost" size="icon-sm" aria-label="Edit contact" onClick={() => handleEditContact(contact)} className="hover:text-foreground">
-                                                                        <Edit2 className="w-4 h-4" />
-                                                                    </Button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent side="top"><p className="text-xs">Edit</p></TooltipContent>
-                                                            </Tooltip>
-                                                            <Tooltip>
-                                                                <TooltipTrigger asChild>
-                                                                    <Button variant="ghost" size="icon-sm" aria-label="Delete contact" onClick={() => handleDeleteClick(contact)} className="hover:text-destructive">
-                                                                        <Trash2 className="w-4 h-4" />
-                                                                    </Button>
-                                                                </TooltipTrigger>
-                                                                <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
-                                                            </Tooltip>
-                                                        </TooltipProvider>
-                                                    </div>
-                                                </td>
-                                            </motion.tr>
-                                        );
-                                    })}
-                                </tbody>
-                            </table>
+                            )}
+                        </ActiveFilterChips>
+                    }
+                    rowActions={(contact) => (
+                        <div className="flex items-center justify-end gap-0.5 text-muted-foreground">
+                            <TooltipProvider delayDuration={300}>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="icon-sm" aria-label="Send email" onClick={() => handleSingleEmail(contact)} className="hover:text-primary">
+                                            <Mail className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Send email</p></TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="icon-sm" aria-label="Edit contact" onClick={() => handleEditContact(contact)} className="hover:text-foreground">
+                                            <Edit2 className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Edit</p></TooltipContent>
+                                </Tooltip>
+                                <Tooltip>
+                                    <TooltipTrigger asChild>
+                                        <Button variant="ghost" size="icon-sm" aria-label="Delete contact" onClick={() => handleDeleteClick(contact)} className="hover:text-destructive">
+                                            <Trash2 className="w-4 h-4" />
+                                        </Button>
+                                    </TooltipTrigger>
+                                    <TooltipContent side="top"><p className="text-xs">Delete</p></TooltipContent>
+                                </Tooltip>
+                            </TooltipProvider>
                         </div>
-                    </motion.div>
-                ) : activeFilterCount > 0 || searchQuery ? (
-                    <EmptyState
-                        icon={<FilterX className="w-8 h-8 text-muted-foreground" />}
-                        title="No contacts match your filters"
-                        description="Try adjusting your search or removing some filters."
-                        action={
-                            <Button variant="outline" onClick={clearAllFilters}>
-                                <FilterX className="w-4 h-4" />
-                                Clear filters
-                            </Button>
-                        }
-                    />
-                ) : (
-                    <EmptyState
-                        icon={<Users className="w-8 h-8 text-muted-foreground" />}
-                        title="No contacts yet"
-                        description="Add your first contact to start sending emails."
-                        action={
-                            <Button onClick={handleAddContact}>
-                                <Plus className="w-4 h-4" />
-                                Add Contact
-                            </Button>
-                        }
-                    />
-                )}
-
-                {/* ── Footer (one-line) ────────────────────────────────────── */}
-                {filteredContacts.length > 0 && (
-                    <div className="flex items-center justify-between gap-3 mt-4 px-1 text-xs text-muted-foreground tabular-nums">
-                        <span>Showing {contactFrom}–{contactTo} of {filteredContacts.length}</span>
-                        {contactTotalPages > 1 && (
-                            <div className="flex items-center gap-1">
-                                <Button variant="ghost" size="icon-sm" onClick={goContactPrev} disabled={!hasContactPrev} aria-label="Previous page">
-                                    <ChevronLeft className="h-4 w-4" />
+                    )}
+                    emptyState={() =>
+                        activeFilterCount > 0 || searchQuery ? (
+                            <>
+                                <PlayOnceImage
+                                    animatedSrc="/illustrations/no-contacts.webp"
+                                    staticSrc="/illustrations/no-contacts.png"
+                                    durationMs={2200}
+                                    width={128}
+                                    height={128}
+                                    className="h-32 w-32"
+                                />
+                                <p className="text-sm text-muted-foreground">No contacts match your search or filters.</p>
+                                <Button variant="outline" size="sm" onClick={clearAllFilters}>
+                                    Clear filters
                                 </Button>
-                                <span className="px-2 font-medium">Page {contactPage} of {contactTotalPages}</span>
-                                <Button variant="ghost" size="icon-sm" onClick={goContactNext} disabled={!hasContactNext} aria-label="Next page">
-                                    <ChevronRight className="h-4 w-4" />
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                )}
+                            </>
+                        ) : (
+                            <>
+                                <PlayOnceImage
+                                    animatedSrc="/illustrations/no-contacts.webp"
+                                    staticSrc="/illustrations/no-contacts.png"
+                                    durationMs={2200}
+                                    width={128}
+                                    height={128}
+                                    className="h-32 w-32"
+                                />
+                                <p className="text-sm text-muted-foreground">No contacts yet. Hit Add Contact to create your first one.</p>
+                            </>
+                        )
+                    }
+                />
             </div>
 
             {/* ── Floating Bulk Action Toolbar ─────────────────────────────── */}
@@ -1238,8 +1098,17 @@ export default function ContactsPage() {
                 )}
             </AnimatePresence>
 
+            <AddContactsDialog
+                open={dialogOpen && !editContact}
+                onOpenChange={setDialogOpen}
+                onSubmit={handleAddContacts}
+                roleOptions={roleOptions}
+                groupOptions={groupOptions}
+                existingEmails={contacts.map((c) => c.email)}
+            />
+
             <ContactDialog
-                open={dialogOpen}
+                open={dialogOpen && !!editContact}
                 onOpenChange={setDialogOpen}
                 onSubmit={handleSubmitContact}
                 editContact={editContact}

@@ -77,7 +77,7 @@ export function ContactDetailDrawer({ contact, onClose, onEdit }: ContactDetailD
                         </AvatarFallback>
                     </Avatar>
                     <div className="text-center">
-                        <h2 className="text-heading-4 font-heading">{contact.name}</h2>
+                        <h2 className="text-base font-semibold">{contact.name}</h2>
                         <p className="text-body-sm text-muted-foreground">{contact.email}</p>
                     </div>
                     <div className="flex gap-2 mt-1">

@@ -122,19 +122,19 @@ export const ContactDialog = ({
 
                 <form onSubmit={handleSubmit(onFormSubmit)} className="space-y-4 mt-4">
                     <div className="space-y-1.5">
-                        <Label htmlFor="contact-name">Full Name *</Label>
+                        <Label htmlFor="contact-name">Full Name <span className="text-destructive">*</span></Label>
                         <Input id="contact-name" placeholder="Enter full name" {...register("name")} aria-invalid={!!errors.name} />
                         {errors.name && <p className="text-xs text-destructive">{errors.name.message}</p>}
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label htmlFor="contact-email">Email Address *</Label>
+                        <Label htmlFor="contact-email">Email Address <span className="text-destructive">*</span></Label>
                         <Input id="contact-email" type="email" placeholder="Enter email address" {...register("email")} aria-invalid={!!errors.email} />
                         {errors.email && <p className="text-xs text-destructive">{errors.email.message}</p>}
                     </div>
 
                     <div className="space-y-1.5">
-                        <Label htmlFor="contact-company">Company *</Label>
+                        <Label htmlFor="contact-company">Company <span className="text-destructive">*</span></Label>
                         <Input id="contact-company" placeholder="Enter company name" {...register("company")} aria-invalid={!!errors.company} />
                         {errors.company && <p className="text-xs text-destructive">{errors.company.message}</p>}
                     </div>

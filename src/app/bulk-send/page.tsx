@@ -20,6 +20,7 @@ import {
     Square,
     RotateCcw,
     Briefcase,
+    Mails,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -495,9 +496,9 @@ function BulkSendContent() {
     // ── Render ────────────────────────────────────────────────────────────
     if (loading) {
         return (
-            <div className="p-4 md:p-8 max-w-7xl mx-auto">
-                <PageHeader title="Bulk Send" description="Send a template to organisations, groups or people in one go" />
-                <div className="h-96 rounded-xl bg-muted/40 animate-pulse" />
+            <div className="px-4 py-6 md:px-8">
+                <PageHeader icon={Mails} title="Bulk Send" description="Send a template to organisations, groups or people in one go" />
+                <div className="h-96 rounded-2xl bg-muted/40 animate-pulse" />
             </div>
         );
     }
@@ -505,19 +506,19 @@ function BulkSendContent() {
     const visibleRecipients = showAllRecipients ? recipients : recipients.slice(0, RECIPIENT_PREVIEW_LIMIT);
 
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto">
-            <PageHeader title="Bulk Send" description="Send a template to organisations, groups or people in one go" />
+        <div className="px-4 py-6 md:px-8">
+            <PageHeader icon={Mails} title="Bulk Send" description="Send a template to organisations, groups or people in one go" />
 
             <motion.div
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
             >
                 {/* ── Left: choose ─────────────────────────────────────── */}
-                <div className="space-y-6">
+                <div className="space-y-5">
                     {/* Step 1 — Template */}
-                    <section className="bg-card rounded-xl border border-border shadow-card p-6 space-y-4">
+                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
                         <StepTitle n={1} icon={FileText} title="Template" />
                         {templates.length === 0 ? (
                             <p className="text-sm text-muted-foreground">
@@ -560,7 +561,7 @@ function BulkSendContent() {
                     </section>
 
                     {/* Step 2 — Audience */}
-                    <section className="bg-card rounded-xl border border-border shadow-card p-6 space-y-5">
+                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-5">
                         <StepTitle n={2} icon={Users} title="Recipients" />
 
                         {contacts.length === 0 && (
@@ -764,7 +765,7 @@ function BulkSendContent() {
 
                     {/* Step 3 — Custom placeholders */}
                     {customPlaceholders.length > 0 && (
-                        <section className="bg-card rounded-xl border border-border shadow-card p-6 space-y-4">
+                        <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
                             <StepTitle n={3} icon={Braces} title="Fill in placeholders" />
                             <p className="text-xs text-muted-foreground">
                                 These aren&apos;t filled in automatically. The same value is used for every recipient.
@@ -792,7 +793,7 @@ function BulkSendContent() {
 
                 {/* ── Right: preview + send ────────────────────────────── */}
                 <div className="space-y-6 lg:sticky lg:top-6 self-start">
-                    <section className="bg-card rounded-xl border border-border shadow-card p-6 space-y-4">
+                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
                         <div className="flex items-center justify-between gap-3">
                             <StepTitle n={customPlaceholders.length > 0 ? 4 : 3} icon={Eye} title="Preview" />
                             {recipients.length > 1 && (
@@ -843,7 +844,7 @@ function BulkSendContent() {
                         )}
                     </section>
 
-                    <section className="bg-card rounded-xl border border-border shadow-card p-6 space-y-4">
+                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
                         <StepTitle n={customPlaceholders.length > 0 ? 5 : 4} icon={Send} title="Send" />
 
                         {mailConfigured ? (
@@ -977,8 +978,8 @@ function BulkSendContent() {
 
 function StepTitle({ n, icon: Icon, title }: { n: number; icon: typeof FileText; title: string }) {
     return (
-        <h2 className="flex items-center gap-2 text-sm font-semibold">
-            <span className="w-5 h-5 rounded-full bg-primary/10 text-primary text-[11px] flex items-center justify-center">
+        <h2 className="flex items-center gap-2.5 text-base font-semibold">
+            <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center">
                 {n}
             </span>
             <Icon className="w-4 h-4 text-muted-foreground" />

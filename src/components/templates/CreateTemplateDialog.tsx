@@ -261,10 +261,10 @@ export const CreateTemplateDialog = ({
                             <VariablePicker onInsert={handleInsertVariable} />
                         </div>
                         <div className="flex-1 flex flex-col overflow-hidden px-6 pb-3">
-                            <div className="mb-2.5">
+                            <div className="mb-2.5 shrink-0">
                                 <AiImagePanel onInsert={handleInsertImage} />
                             </div>
-                            <div className="flex-1 min-h-0">
+                            <div className="flex-1 min-h-0 flex flex-col">
                                 <RichTextEditor
                                     key={editorKey}
                                     content={body}
@@ -278,7 +278,7 @@ export const CreateTemplateDialog = ({
                                     onReady={setEditorInstance}
                                 />
                             </div>
-                            <p className="text-[11px] text-muted-foreground/80 mt-2 flex items-start gap-1.5 leading-relaxed">
+                            <p className="shrink-0 text-[11px] text-muted-foreground/80 mt-2 flex items-start gap-1.5 leading-relaxed">
                                 <Info className="w-3 h-3 shrink-0 mt-0.5" />
                                 <span>
                                     Tip: use{" "}
@@ -337,11 +337,13 @@ function Field({
     children: React.ReactNode;
 }) {
     return (
-        <div className="grid grid-cols-[88px_1fr] items-center gap-3">
-            <Label className="text-xs font-medium text-muted-foreground flex items-center gap-1 justify-end">
-                {label}
-                {required && <span className="text-destructive">*</span>}
-                {hint && <span className="text-muted-foreground/60 font-normal text-[10px]">{hint}</span>}
+        <div className="grid grid-cols-[96px_1fr] items-center gap-3">
+            <Label className="flex flex-col items-end gap-0.5 text-right text-xs font-medium leading-tight text-muted-foreground">
+                <span className="flex items-center gap-1">
+                    {label}
+                    {required && <span className="text-destructive">*</span>}
+                </span>
+                {hint && <span className="text-[10px] font-normal text-muted-foreground/60">{hint}</span>}
             </Label>
             <div>{children}</div>
         </div>

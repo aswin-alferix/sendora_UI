@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
+import { Geist } from "next/font/google";
 import "./globals.css";
 import { AppLayout } from "@/components/layout/AppLayout";
 import { Providers } from "@/components/providers";
 
-const inter = Inter({ subsets: ["latin"] });
+// Geist, same as Nexus-TG. Exposed as --font-app for globals.css.
+const geist = Geist({ subsets: ["latin"], variable: "--font-app", display: "swap" });
 
 export const metadata: Metadata = {
   title: "Sendora",
@@ -17,8 +18,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="en" className={geist.variable} suppressHydrationWarning>
+      {/* suppressHydrationWarning: extensions like Grammarly add attributes to <body> before React loads */}
+      <body className={geist.className} suppressHydrationWarning>
         <Providers>
           <AppLayout>{children}</AppLayout>
         </Providers>

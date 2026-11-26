@@ -1,14 +1,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { motion } from "framer-motion";
-import { Plus, Search, FileText, MoreVertical, Copy, Edit2, Trash2, Eye, Send } from "lucide-react";
+import { Plus, FileText, MoreVertical, Copy, Edit2, Trash2, Eye, Send, Paperclip } from "lucide-react";
 
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/shared/PageHeader";
-import { EmptyState } from "@/components/shared/EmptyState";
+import { PlayOnceImage } from "@/components/shared/PlayOnceImage";
+import { DataTable, type DataTableColumn } from "@/components/shared/data-table/DataTable";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import {
     DropdownMenu,
     DropdownMenuContent,
@@ -70,7 +69,10 @@ interface Template {
     description: string;
     body?: string;
     attachments?: UploadedFile[];
+    /** Friendly "2h ago" label. */
     updatedAt: string;
+    /** Raw timestamp, for sorting. */
+    updatedIso?: string;
 }
 
 function relativeTime(iso: string): string {
@@ -102,18 +104,6 @@ function nextCopyName(baseName: string, existingNames: string[]): string {
     return next === 1 ? `${root} (Copy)` : `${root} (Copy ${next})`;
 }
 
-const container = {
-    hidden: { opacity: 0 },
-    show: {
-        opacity: 1,
-        transition: { staggerChildren: 0.05 },
-    },
-};
-
-const item = {
-    hidden: { opacity: 0, y: 10 },
-    show: { opacity: 1, y: 0 },
-};
 
 export default function TemplatesPage() {
     const router = useRouter();
@@ -135,6 +125,7 @@ export default function TemplatesPage() {
                     body: t.body,
                     attachments: t.attachments ?? [],
                     updatedAt: relativeTime(t.updatedAt),
+                    updatedIso: t.updatedAt,
                 }));
                 setTemplates(items);
             } catch (err) {
@@ -145,7 +136,6 @@ export default function TemplatesPage() {
         })();
         return () => { cancelled = true; };
     }, []);
-    const [searchQuery, setSearchQuery] = useState("");
     const [isCreateDialogOpen, setIsCreateDialogOpen] = useState(false);
     const [editingTemplate, setEditingTemplate] = useState<Template | null>(null);
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
@@ -162,11 +152,6 @@ export default function TemplatesPage() {
     }, []);
     const { toast } = useToast();
 
-    const filteredTemplates = templates.filter(
-        (template) =>
-            template.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-            template.subject.toLowerCase().includes(searchQuery.toLowerCase())
-    );
 
     const handleCreateOrUpdateTemplate = async (templateData: {
         id?: string;
@@ -186,7 +171,7 @@ export default function TemplatesPage() {
                 if (!res.ok) throw new Error("Update failed");
                 const updated = await res.json();
                 setTemplates((prev) =>
-                    prev.map((t) => (t.id === templateData.id ? { ...t, ...updated, updatedAt: relativeTime(updated.updatedAt) } : t))
+                    prev.map((t) => (t.id === templateData.id ? { ...t, ...updated, updatedAt: relativeTime(updated.updatedAt), updatedIso: updated.updatedAt } : t))
                 );
                 toast({
                     title: "Changes Saved",
@@ -201,7 +186,7 @@ export default function TemplatesPage() {
                 });
                 if (!res.ok) throw new Error("Create failed");
                 const created = await res.json();
-                setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt) }, ...prev]);
+                setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt), updatedIso: created.updatedAt }, ...prev]);
                 toast({
                     title: "Template Created",
                     description: `"${templateData.name}" has been created successfully.`,
@@ -254,7 +239,7 @@ export default function TemplatesPage() {
             });
             if (!res.ok) throw new Error("Duplicate failed");
             const created = await res.json();
-            setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt) }, ...prev]);
+            setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt), updatedIso: created.updatedAt }, ...prev]);
             toast({
                 title: "Template Duplicated",
                 description: `"${newName}" has been created.`,
@@ -285,114 +270,146 @@ export default function TemplatesPage() {
         router.push("/compose");
     };
 
+    const columns: DataTableColumn<Template>[] = [
+        {
+            id: "name",
+            header: "Template",
+            hideable: false,
+            sortValue: (t) => t.name,
+            className: "min-w-[260px]",
+            cell: (t) => (
+                <div className="flex items-center gap-3 min-w-0">
+                    <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                        <FileText className="h-4 w-4" />
+                    </span>
+                    <div className="min-w-0">
+                        <p className="truncate font-semibold" title={t.name}>{t.name}</p>
+                        {t.description && (
+                            <p className="max-w-[320px] truncate text-xs text-muted-foreground" title={t.description}>
+                                {t.description}
+                            </p>
+                        )}
+                    </div>
+                </div>
+            ),
+        },
+        {
+            id: "subject",
+            header: "Subject",
+            sortValue: (t) => t.subject,
+            className: "min-w-[240px]",
+            cell: (t) => (
+                <span className="block max-w-[420px] truncate text-muted-foreground" title={t.subject}>
+                    {t.subject}
+                </span>
+            ),
+        },
+        {
+            id: "attachments",
+            header: "Attachments",
+            sortValue: (t) => t.attachments?.length ?? 0,
+            className: "whitespace-nowrap",
+            cell: (t) =>
+                t.attachments?.length ? (
+                    <span className="inline-flex items-center gap-1.5 text-muted-foreground">
+                        <Paperclip className="h-3.5 w-3.5" />
+                        {t.attachments.length}
+                    </span>
+                ) : (
+                    <span className="text-muted-foreground/50">—</span>
+                ),
+        },
+        {
+            id: "updated",
+            header: "Updated",
+            sortValue: (t) => (t.updatedIso ? new Date(t.updatedIso) : null),
+            className: "whitespace-nowrap",
+            cell: (t) => <span className="text-muted-foreground">{t.updatedAt}</span>,
+        },
+    ];
+
     return (
         <>
-            <div className="p-4 md:p-8 max-w-7xl mx-auto">
+            <div className="flex h-[calc(100dvh-4rem)] min-h-[600px] flex-col px-4 py-6 md:px-8">
                 <PageHeader
+                    icon={FileText}
                     title="Email Templates"
+                    count={loading ? undefined : templates.length}
                     description="Create and manage reusable email templates"
                     action={
-                        <Button onClick={() => setIsCreateDialogOpen(true)}>
+                        <Button className="h-9 rounded-lg" onClick={() => setIsCreateDialogOpen(true)}>
                             <Plus className="w-4 h-4" />
                             Create Template
                         </Button>
                     }
                 />
 
-                {/* Search */}
-                <motion.div
-                    initial={{ opacity: 0, y: 10 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="mb-6"
-                >
-                    <div className="relative max-w-md">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                        <Input
-                            placeholder="Search templates..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            className="pl-10"
-                        />
-                    </div>
-                </motion.div>
-
-                {/* Templates Grid */}
-                {filteredTemplates.length > 0 ? (
-                    <motion.div
-                        variants={container}
-                        initial="hidden"
-                        animate="show"
-                        className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6"
-                    >
-                        {filteredTemplates.map((template) => (
-                            <motion.div
-                                key={template.id}
-                                variants={item}
-                                whileHover={{ y: -4 }}
-                                className="bg-card rounded-xl border border-border shadow-card p-6 transition-shadow hover:shadow-md"
-                            >
-                                <div className="flex items-start justify-between mb-4">
-                                    <div className="flex items-center justify-center w-10 h-10 rounded-lg bg-accent">
-                                        <FileText className="w-5 h-5 text-accent-foreground" />
-                                    </div>
-                                    <DropdownMenu>
-                                        <DropdownMenuTrigger asChild>
-                                            <Button variant="ghost" size="icon-sm">
-                                                <MoreVertical className="w-4 h-4" />
-                                            </Button>
-                                        </DropdownMenuTrigger>
-                                        <DropdownMenuContent align="end">
-                                            <DropdownMenuItem onClick={() => setPreviewTemplate(template)}>
-                                                <Eye className="w-4 h-4 mr-2" />
-                                                Preview
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleUseInCompose(template)}>
-                                                <Send className="w-4 h-4 mr-2" />
-                                                Use in Compose
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleEditTemplate(template)}>
-                                                <Edit2 className="w-4 h-4 mr-2" />
-                                                Edit
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem onClick={() => handleDuplicateTemplate(template)}>
-                                                <Copy className="w-4 h-4 mr-2" />
-                                                Duplicate
-                                            </DropdownMenuItem>
-                                            <DropdownMenuItem
-                                                className="text-destructive"
-                                                onClick={() => handleDeleteClick(template)}
-                                            >
-                                                <Trash2 className="w-4 h-4 mr-2" />
-                                                Delete
-                                            </DropdownMenuItem>
-                                        </DropdownMenuContent>
-                                    </DropdownMenu>
-                                </div>
-                                <h3 className="text-heading-4 font-heading text-foreground mb-1">
-                                    {template.name}
-                                </h3>
-                                <p className="text-body-sm text-muted-foreground mb-3 truncate">
-                                    {template.subject}
+                <DataTable
+                    data={templates}
+                    columns={columns}
+                    getRowId={(t) => t.id}
+                    loading={loading}
+                    itemLabel="templates"
+                    initialSort={{ id: "updated", desc: true }}
+                    getSearchText={(t) => `${t.name} ${t.subject} ${t.description ?? ""}`}
+                    searchPlaceholder="Search by name, subject or description…"
+                    onRowClick={(t) => setPreviewTemplate(t)}
+                    rowActions={(template) => (
+                        <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                                <Button variant="ghost" size="icon-sm" aria-label="Template actions">
+                                    <MoreVertical className="w-4 h-4" />
+                                </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-44">
+                                <DropdownMenuItem onClick={() => setPreviewTemplate(template)}>
+                                    <Eye className="w-4 h-4 mr-2" />
+                                    Preview
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleUseInCompose(template)}>
+                                    <Send className="w-4 h-4 mr-2" />
+                                    Use in Compose
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleEditTemplate(template)}>
+                                    <Edit2 className="w-4 h-4 mr-2" />
+                                    Edit
+                                </DropdownMenuItem>
+                                <DropdownMenuItem onClick={() => handleDuplicateTemplate(template)}>
+                                    <Copy className="w-4 h-4 mr-2" />
+                                    Duplicate
+                                </DropdownMenuItem>
+                                <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteClick(template)}>
+                                    <Trash2 className="w-4 h-4 mr-2" />
+                                    Delete
+                                </DropdownMenuItem>
+                            </DropdownMenuContent>
+                        </DropdownMenu>
+                    )}
+                    emptyState={({ searching, clearSearch }) => (
+                        <>
+                            <PlayOnceImage
+                                animatedSrc="/illustrations/no-templates.webp"
+                                staticSrc="/illustrations/no-templates.png"
+                                durationMs={2000}
+                                width={128}
+                                height={128}
+                                className="w-32 h-32"
+                            />
+                            {!searching ? (
+                                <p className="text-sm text-muted-foreground">
+                                    No templates yet. Hit Create Template to save your first one.
                                 </p>
-                                <p className="text-body-xs text-muted-foreground">
-                                    Updated {template.updatedAt}
-                                </p>
-                            </motion.div>
-                        ))}
-                    </motion.div>
-                ) : (
-                    <EmptyState
-                        icon={<FileText className="w-8 h-8 text-muted-foreground" />}
-                        title="No templates found"
-                        description="Create your first email template to save time on repetitive emails."
-                        action={
-                            <Button onClick={() => setIsCreateDialogOpen(true)}>
-                                <Plus className="w-4 h-4" />
-                                Create Template
-                            </Button>
-                        }
-                    />
-                )}
+                            ) : (
+                                <>
+                                    <p className="text-sm text-muted-foreground">No templates match your search.</p>
+                                    <Button variant="outline" size="sm" onClick={clearSearch}>
+                                        Clear search
+                                    </Button>
+                                </>
+                            )}
+                        </>
+                    )}
+                />
             </div>
 
             <CreateTemplateDialog

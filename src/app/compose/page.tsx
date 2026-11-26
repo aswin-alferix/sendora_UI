@@ -2,6 +2,7 @@
 
 import { useSearchParams } from "next/navigation";
 import { useState, Suspense } from "react";
+import { Mail } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { ComposeForm } from "@/components/email/ComposeForm";
 import type { UploadedFile } from "@/lib/files";
@@ -30,8 +31,9 @@ function ComposeContent() {
     const [template] = useState(readPendingTemplate);
 
     return (
-        <div className="p-4 md:p-8 max-w-4xl mx-auto">
+        <div className="px-4 py-6 md:px-8">
             <PageHeader
+                icon={Mail}
                 title="Compose Email"
                 description="Create and send a new email"
             />

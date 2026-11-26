@@ -5,7 +5,7 @@ import { motion } from "framer-motion";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-    Mail, Send, Clock, ArrowRight, Plus, CheckCircle, AlertCircle, CalendarClock,
+    Mail, Send, Clock, ArrowRight, Plus, CheckCircle, AlertCircle, CalendarClock, LayoutDashboard, FileText, UserPlus,
 } from "lucide-react";
 import {
     AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip as ChartTooltip, ResponsiveContainer, Legend,
@@ -13,10 +13,9 @@ import {
 import { PageHeader } from "@/components/shared/PageHeader";
 import { StatCard } from "@/components/shared/StatCard";
 import { EmailRow } from "@/components/shared/EmailRow";
+import { PlayOnceImage } from "@/components/shared/PlayOnceImage";
 import { Button } from "@/components/ui/button";
-import {
-    Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
-} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
 
 interface ApiEmail {
     id: string;
@@ -59,6 +58,15 @@ function bucketEmailsByDay(emails: ApiEmail[], days: number) {
     return Object.values(buckets);
 }
 
+/** Rows shown in "Recent Emails"; "View all" appears only when there are more. */
+const RECENT_LIMIT = 5;
+
+const QUICK_ACTIONS = [
+    { href: "/compose", label: "New Email", icon: Mail },
+    { href: "/templates", label: "Create Template", icon: FileText },
+    { href: "/contacts", label: "Add Contact", icon: UserPlus },
+];
+
 const container = { hidden: { opacity: 0 }, show: { opacity: 1, transition: { staggerChildren: 0.1 } } };
 const item = { hidden: { opacity: 0, y: 20 }, show: { opacity: 1, y: 0 } };
 
@@ -98,7 +106,7 @@ export default function Dashboard() {
 
     const recentEmails = useMemo(
         () =>
-            emails.slice(0, 5).map((e) => ({
+            emails.slice(0, RECENT_LIMIT).map((e) => ({
                 id: e.id,
                 to: e.to.join(", "),
                 subject: e.subject,
@@ -112,12 +120,13 @@ export default function Dashboard() {
     );
 
     return (
-        <div className="p-4 md:p-8 max-w-7xl mx-auto">
+        <div className="px-4 py-6 md:px-8">
             <PageHeader
+                icon={LayoutDashboard}
                 title="Dashboard"
-                description="Monitor your email activity and performance"
+                description="Snapshot of your email activity and performance"
                 action={
-                    <Button asChild>
+                    <Button asChild className="h-9 rounded-lg">
                         <Link href="/compose">
                             <Plus className="w-4 h-4" />
                             Compose Email
@@ -127,43 +136,50 @@ export default function Dashboard() {
             />
 
             {/* Stats Grid */}
-            <motion.div variants={container} initial="hidden" animate="show" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
+            <motion.div variants={container} initial="hidden" animate="show" className="mb-5 grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-4">
                 <motion.div variants={item}>
-                    <StatCard icon={<Send className="w-6 h-6 text-primary" />} label="Emails Sent" value={loading ? "—" : stats.sent.toLocaleString()} />
+                    <StatCard icon={Send} tone="primary" label="Emails Sent" value={loading ? "—" : stats.sent.toLocaleString()} hint="All time" />
                 </motion.div>
                 <motion.div variants={item}>
-                    <StatCard icon={<CheckCircle className="w-6 h-6 text-success" />} label="Delivery Rate" value={loading ? "—" : stats.deliveryRate} />
+                    <StatCard icon={CheckCircle} tone="success" label="Delivery Rate" value={loading ? "—" : stats.deliveryRate} hint="Sent out of sent + failed" />
                 </motion.div>
                 <motion.div variants={item}>
-                    <StatCard icon={<CalendarClock className="w-6 h-6 text-warning" />} label="Scheduled" value={loading ? "—" : stats.scheduled.toLocaleString()} />
+                    <StatCard icon={CalendarClock} tone="warning" label="Scheduled" value={loading ? "—" : stats.scheduled.toLocaleString()} hint="Waiting to go out" />
                 </motion.div>
                 <motion.div variants={item}>
-                    <StatCard icon={<AlertCircle className="w-6 h-6 text-destructive" />} label="Failed" value={loading ? "—" : stats.failed.toLocaleString()} />
+                    <StatCard icon={AlertCircle} tone="destructive" label="Failed" value={loading ? "—" : stats.failed.toLocaleString()} hint="Need a retry" />
                 </motion.div>
             </motion.div>
 
             {/* Chart */}
             <motion.div
-                initial={{ opacity: 0, y: 20 }}
+                initial={{ opacity: 0, y: 12 }}
                 animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.25 }}
-                className="bg-card rounded-xl border border-border shadow-card p-6 mb-8"
+                transition={{ delay: 0.2 }}
+                className="mb-5 rounded-2xl border border-border bg-card p-5 shadow-card"
             >
-                <div className="flex items-center justify-between mb-6">
+                <div className="mb-4 flex items-center justify-between gap-4">
                     <div>
-                        <h2 className="text-heading-4 font-heading text-foreground">Email Performance</h2>
-                        <p className="text-body-sm text-muted-foreground">Sent, scheduled, and failed over time</p>
+                        <h2 className="text-base font-semibold text-foreground">Email Performance</h2>
+                        <p className="text-[13px] text-muted-foreground">Sent, scheduled, and failed over time</p>
                     </div>
-                    <Select value={period} onValueChange={(v) => setPeriod(v as "7d" | "30d" | "90d")}>
-                        <SelectTrigger className="w-28">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="7d">Last 7 days</SelectItem>
-                            <SelectItem value="30d">Last 30 days</SelectItem>
-                            <SelectItem value="90d">Last 90 days</SelectItem>
-                        </SelectContent>
-                    </Select>
+                    {/* Segmented period switch */}
+                    <div className="inline-flex rounded-lg bg-muted p-0.5" role="group" aria-label="Period">
+                        {(["7d", "30d", "90d"] as const).map((p) => (
+                            <button
+                                key={p}
+                                type="button"
+                                onClick={() => setPeriod(p)}
+                                aria-pressed={period === p}
+                                className={cn(
+                                    "rounded-md px-3 py-1 text-xs font-semibold uppercase transition-colors",
+                                    period === p ? "bg-primary text-primary-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                )}
+                            >
+                                {p}
+                            </button>
+                        ))}
+                    </div>
                 </div>
                 <ResponsiveContainer width="100%" height={260}>
                     <AreaChart data={chartData} margin={{ top: 4, right: 4, left: -20, bottom: 0 }}>
@@ -182,8 +198,8 @@ export default function Dashboard() {
                             </linearGradient>
                         </defs>
                         <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-                        <XAxis dataKey="date" tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
-                        <YAxis tick={{ fontSize: 11, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                        <XAxis dataKey="date" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
+                        <YAxis allowDecimals={false} tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} axisLine={false} tickLine={false} />
                         <ChartTooltip
                             contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 8, fontSize: 12 }}
                             labelStyle={{ color: "hsl(var(--foreground))", fontWeight: 600, marginBottom: 4 }}
@@ -197,23 +213,36 @@ export default function Dashboard() {
             </motion.div>
 
             {/* Main Content Grid */}
-            <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+            <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
                 {/* Recent Emails */}
-                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="lg:col-span-2">
-                    <div className="bg-card rounded-xl border border-border shadow-card">
-                        <div className="flex items-center justify-between p-4 border-b border-border">
-                            <h2 className="text-heading-4 font-heading text-foreground">Recent Emails</h2>
-                            <Button variant="ghost" size="sm" asChild>
-                                <Link href="/sent">
-                                    View all <ArrowRight className="w-4 h-4" />
-                                </Link>
-                            </Button>
+                <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.35 }} className="lg:col-span-2 h-full">
+                    <div className="bg-card rounded-2xl border border-border shadow-card h-full flex flex-col overflow-hidden">
+                        <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+                            <h2 className="text-base font-semibold text-foreground">Recent Emails</h2>
+                            {/* Only when there's more than the list shows */}
+                            {emails.length > RECENT_LIMIT && (
+                                <Button variant="ghost" size="sm" className="text-[13px] text-primary hover:text-primary" asChild>
+                                    <Link href="/sent">
+                                        View all <ArrowRight className="w-4 h-4" />
+                                    </Link>
+                                </Button>
+                            )}
                         </div>
-                        <div>
+                        <div className="flex-1 flex flex-col">
                             {loading ? (
-                                <div className="p-12 text-center text-muted-foreground text-sm">Loading…</div>
+                                <div className="flex-1 flex items-center justify-center p-12 text-muted-foreground text-sm">Loading…</div>
                             ) : recentEmails.length === 0 ? (
-                                <div className="p-12 text-center text-muted-foreground text-sm">No emails yet. Hit Compose to send your first one.</div>
+                                <div className="flex-1 flex flex-col items-center justify-center gap-3 p-12 text-center">
+                                    <PlayOnceImage
+                                        animatedSrc="/illustrations/no-emails.webp"
+                                        staticSrc="/illustrations/no-emails.png"
+                                        durationMs={2000}
+                                        width={128}
+                                        height={128}
+                                        className="w-32 h-32"
+                                    />
+                                    <p className="text-sm text-muted-foreground">No emails yet. Hit Compose to send your first one.</p>
+                                </div>
                             ) : (
                                 recentEmails.map((email) => (
                                     <EmailRow
@@ -230,31 +259,38 @@ export default function Dashboard() {
 
                 {/* Quick Actions + Scheduled */}
                 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4 }} className="space-y-6">
-                    <div className="bg-card rounded-xl border border-border shadow-card p-6">
-                        <h2 className="text-heading-4 font-heading text-foreground mb-4">Quick Actions</h2>
-                        <div className="space-y-3">
-                            <Button variant="outline" className="w-full justify-start" asChild>
-                                <Link href="/compose"><Mail className="w-4 h-4 text-primary" />New Email</Link>
-                            </Button>
-                            <Button variant="outline" className="w-full justify-start" asChild>
-                                <Link href="/templates"><Plus className="w-4 h-4 text-primary" />Create Template</Link>
-                            </Button>
-                            <Button variant="outline" className="w-full justify-start" asChild>
-                                <Link href="/contacts"><Plus className="w-4 h-4 text-primary" />Add Contact</Link>
-                            </Button>
+                    <div className="bg-card rounded-2xl border border-border shadow-card p-5">
+                        <h2 className="text-base font-semibold text-foreground mb-4">Quick Actions</h2>
+                        <div className="space-y-2.5">
+                            {QUICK_ACTIONS.map(({ href, label, icon: Icon }, i) => (
+                                <Button
+                                    key={href}
+                                    variant={i === 0 ? "default" : "outline"}
+                                    className="group h-11 w-full justify-between rounded-xl px-4 font-semibold"
+                                    asChild
+                                >
+                                    <Link href={href}>
+                                        <span className="flex items-center gap-2.5">
+                                            <Icon className="w-4 h-4" />
+                                            {label}
+                                        </span>
+                                        <ArrowRight className={cn("w-4 h-4 transition-transform group-hover:translate-x-0.5", i !== 0 && "text-muted-foreground")} />
+                                    </Link>
+                                </Button>
+                            ))}
                         </div>
                     </div>
 
-                    <div className="bg-gradient-to-br from-primary to-primary/80 rounded-xl p-6 text-primary-foreground">
-                        <div className="flex items-center gap-3 mb-4">
+                    <div className="bg-gradient-to-br from-primary to-primary/80 rounded-2xl p-5 text-primary-foreground shadow-card">
+                        <div className="flex items-center gap-3 mb-3">
                             <div className="p-2 rounded-lg bg-primary-foreground/20">
-                                <Clock className="w-5 h-5" />
+                                <Clock className="w-4 h-4" />
                             </div>
-                            <h3 className="text-lg font-medium">Scheduled</h3>
+                            <h3 className="text-base font-semibold">Scheduled</h3>
                         </div>
-                        <p className="text-4xl font-heading font-bold mb-2 tabular-nums">{loading ? "—" : stats.scheduled}</p>
+                        <p className="text-3xl font-bold mb-1 tabular-nums tracking-tight">{loading ? "—" : stats.scheduled}</p>
                         <p className="text-primary-foreground/80 text-sm">Emails scheduled for delivery</p>
-                        <Button variant="secondary" size="sm" className="mt-4 bg-primary-foreground/20 hover:bg-primary-foreground/30 text-primary-foreground border-0" asChild>
+                        <Button variant="secondary" size="sm" className="mt-4 rounded-lg bg-primary-foreground/20 hover:bg-primary-foreground/30 text-primary-foreground border-0" asChild>
                             <Link href="/history">View Schedule</Link>
                         </Button>
                     </div>

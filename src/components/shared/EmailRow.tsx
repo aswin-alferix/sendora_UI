@@ -48,18 +48,18 @@ export function EmailRow({ id, to, subject, status, date, onView, onResend }: Em
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             whileHover={{ backgroundColor: "hsl(var(--muted))" }}
-            className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 p-4 border-b border-border last:border-b-0 transition-colors"
+            className="flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-4 px-5 py-3.5 border-b border-border last:border-b-0 transition-colors"
         >
             <div className="flex-1 min-w-0">
-                <p className="text-body-base font-medium text-foreground truncate">{to}</p>
-                <p className="text-body-sm text-muted-foreground truncate mt-0.5">{subject}</p>
+                <p className="text-sm font-semibold text-foreground truncate">{to}</p>
+                <p className="text-[13px] text-muted-foreground truncate mt-0.5">{subject}</p>
             </div>
 
             <div className="flex items-center justify-between sm:justify-end gap-3 shrink-0">
                 <div className="flex items-center gap-3">
                     <span
                         className={cn(
-                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-body-xs font-medium",
+                            "inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold",
                             statusInfo.className
                         )}
                     >
@@ -67,7 +67,7 @@ export function EmailRow({ id, to, subject, status, date, onView, onResend }: Em
                         {statusInfo.label}
                     </span>
 
-                    <span className="text-body-sm text-muted-foreground hidden sm:inline sm:w-24 sm:text-right">{date}</span>
+                    <span className="text-[13px] text-muted-foreground hidden sm:inline sm:w-24 sm:text-right">{date}</span>
                 </div>
 
                 <DropdownMenu>

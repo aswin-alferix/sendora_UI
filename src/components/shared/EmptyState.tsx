@@ -26,7 +26,7 @@ export function EmptyState({ icon, title, description, action, className }: Empt
             <div className="flex items-center justify-center w-16 h-16 rounded-full bg-muted mb-6">
                 {icon}
             </div>
-            <h3 className="text-heading-4 font-heading text-foreground mb-2">{title}</h3>
+            <h3 className="text-base font-semibold text-foreground mb-2">{title}</h3>
             <p className="text-body-base text-muted-foreground max-w-sm mb-6">{description}</p>
             {action}
         </motion.div>

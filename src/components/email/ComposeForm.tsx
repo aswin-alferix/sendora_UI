@@ -1,63 +1,50 @@
 "use client";
 
-import { useEffect, useCallback, useState, useMemo } from "react";
+import { useEffect, useCallback, useState, useMemo, useSyncExternalStore } from "react";
+import Link from "next/link";
 import { useForm, Controller } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { motion } from "framer-motion";
-import { Send, X, Clock, ChevronDown, ChevronUp, Loader2, Users, Braces, Check, PenTool } from "lucide-react";
+import { Send, X, Clock, Loader2, Users, Braces, Check, PenTool, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Switch } from "@/components/ui/switch";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor, type Attachment } from "@/components/email/RichTextEditor";
+import { SchedulePicker } from "@/components/email/SchedulePicker";
+import { RecipientInput, useHydrated, isRecipientDrag, readRecipientDrag, type RecipientContact } from "@/components/email/RecipientInput";
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
 import { AUTO_PLACEHOLDER_KEYS, extractPlaceholders } from "@/lib/mail/substitute";
 import { apiErrorMessage } from "@/contexts/AuthContext";
 import { formatBytes, type UploadedFile } from "@/lib/files";
+import { isValidEmail } from "@/lib/email";
 
-const emailListSchema = z
+/** The chips already explain bad addresses, so this message is not shown again under the field. */
+const INVALID_ADDRESSES_MSG = "Fix or remove the invalid addresses";
+
+const splitAddresses = (val?: string) =>
+    (val ?? "")
+        .split(",")
+        .map((e) => e.trim())
+        .filter(Boolean);
+
+const optionalEmailList = z
     .string()
-    .refine(
-        (val) =>
-            val
-                .split(",")
-                .map((e) => e.trim())
-                .filter(Boolean)
-                .every((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)),
-        { message: "Enter valid email address(es), comma-separated" }
-    );
+    .optional()
+    .refine((val) => splitAddresses(val).every(isValidEmail), { message: INVALID_ADDRESSES_MSG });
 
 const schema = z.object({
-    to: emailListSchema,
-    cc: z
+    to: z
         .string()
-        .optional()
-        .refine(
-            (val) =>
-                !val ||
-                val
-                    .split(",")
-                    .map((e) => e.trim())
-                    .filter(Boolean)
-                    .every((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)),
-            { message: "Enter valid CC email address(es)" }
-        ),
-    bcc: z
-        .string()
-        .optional()
-        .refine(
-            (val) =>
-                !val ||
-                val
-                    .split(",")
-                    .map((e) => e.trim())
-                    .filter(Boolean)
-                    .every((e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)),
-            { message: "Enter valid BCC email address(es)" }
-        ),
+        .refine((val) => splitAddresses(val).length > 0, { message: "Add at least one recipient" })
+        .refine((val) => splitAddresses(val).every(isValidEmail), { message: INVALID_ADDRESSES_MSG }),
+    cc: optionalEmailList,
+    bcc: optionalEmailList,
     subject: z.string().min(1, "Subject is required"),
     body: z.string().min(1, "Message body is required"),
     scheduledAt: z.string().optional(),
@@ -67,6 +54,72 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>;
 
 const DRAFT_KEY = "compose_draft";
+
+// ─── Sender (from the saved mail provider config) ────────────────────────────
+
+function readSenderSnapshot(): string {
+    try {
+        const raw = localStorage.getItem(MAIL_CONFIG_STORAGE_KEY);
+        if (!raw) return "";
+        const c = JSON.parse(raw) as Partial<MailConfigState>;
+        return c.fromEmail ? JSON.stringify({ name: c.fromName ?? "", email: c.fromEmail }) : "";
+    } catch {
+        return "";
+    }
+}
+
+function subscribeStorage(cb: () => void) {
+    window.addEventListener("storage", cb);
+    return () => window.removeEventListener("storage", cb);
+}
+
+/** Sender name/email saved in Settings → Mail (null until set, and during SSR). */
+function useSender(): { name: string; email: string } | null {
+    const snap = useSyncExternalStore(subscribeStorage, readSenderSnapshot, () => "");
+    return useMemo(() => (snap ? (JSON.parse(snap) as { name: string; email: string }) : null), [snap]);
+}
+
+// ─── Outlook-style field pieces ──────────────────────────────────────────────
+
+function underlineInput(invalid: boolean) {
+    return cn(
+        "h-9 w-full rounded-none border-0 border-b bg-transparent px-1 text-sm text-foreground outline-none transition-colors",
+        "placeholder:text-muted-foreground focus:border-b-2",
+        invalid ? "border-destructive focus:border-destructive" : "border-input focus:border-primary"
+    );
+}
+
+function RecipientRow({
+    id,
+    label,
+    input,
+    trailing,
+    error,
+}: {
+    id: string;
+    label: string;
+    input: React.ReactNode;
+    trailing?: React.ReactNode;
+    error?: string;
+}) {
+    return (
+        <div>
+            <div className="flex items-start gap-3">
+                <label
+                    htmlFor={id}
+                    className="mt-0.5 inline-flex h-8 w-14 shrink-0 cursor-pointer items-center justify-center rounded-md border border-border bg-card text-xs font-semibold text-foreground shadow-sm transition-colors hover:bg-muted"
+                >
+                    {label}
+                </label>
+                <div className="relative min-w-0 flex-1">
+                    {input}
+                    {trailing}
+                </div>
+            </div>
+            {error && error !== INVALID_ADDRESSES_MSG && <p className="ml-[68px] mt-1 text-xs text-destructive">{error}</p>}
+        </div>
+    );
+}
 
 interface ComposeFormProps {
     onSend?: (data: FormData) => void;
@@ -89,7 +142,32 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             preview: a.contentType.startsWith("image/") ? a.url : undefined,
         }))
     );
-    const [showCcBcc, setShowCcBcc] = useState(false);
+    const [showBcc, setShowBcc] = useState(false);
+    const sender = useSender();
+    const senderDomain = sender?.email.split("@")[1]?.toLowerCase();
+    const [draftSavedAt, setDraftSavedAt] = useState<string | null>(null);
+
+    // Address book for recipient chips + suggestions
+    const [contacts, setContacts] = useState<RecipientContact[]>([]);
+    useEffect(() => {
+        let cancelled = false;
+        fetch("/api/contacts")
+            .then((r) => (r.ok ? r.json() : { items: [] }))
+            .then((data: { items?: { name?: string; email?: string }[] }) => {
+                if (cancelled) return;
+                setContacts(
+                    (data.items ?? [])
+                        .filter((c) => c.email)
+                        .map((c) => ({ name: c.name || c.email!, email: c.email! }))
+                );
+            })
+            .catch(() => {
+                /* suggestions are optional */
+            });
+        return () => {
+            cancelled = true;
+        };
+    }, []);
     const [scheduleOpen, setScheduleOpen] = useState(false);
     const [editorKey, setEditorKey] = useState(0);
 
@@ -100,6 +178,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
         reset,
         watch,
         setValue,
+        getValues,
         formState: { errors, isSubmitting },
     } = useForm<FormData>({
         resolver: zodResolver(schema),
@@ -128,12 +207,17 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
     useEffect(() => {
         const timeout = setTimeout(() => {
             localStorage.setItem(DRAFT_KEY, JSON.stringify(watchedValues));
+            const { to, cc, bcc, subject, body } = watchedValues;
+            const hasContent = [to, cc, bcc, subject].some((v) => v?.trim()) || !!body?.replace(/<[^>]*>/g, "").trim();
+            // Minute-level label: same string = no re-render, so this can't loop.
+            setDraftSavedAt(hasContent ? new Date().toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null);
         }, 1000);
         return () => clearTimeout(timeout);
     }, [watchedValues]);
 
     const clearDraft = useCallback(() => {
         localStorage.removeItem(DRAFT_KEY);
+        setDraftSavedAt(null);
     }, []);
 
     const onSubmit = async (data: FormData) => {
@@ -280,6 +364,30 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
         setEditorKey((k) => k + 1);
     };
 
+    /** Drag & drop: move one address between To / Cc / Bcc (no duplicates in the target). */
+    type RecipientField = "to" | "cc" | "bcc";
+    const moveRecipient = (email: string, from: string, to: RecipientField) => {
+        if (from === to || !["to", "cc", "bcc"].includes(from)) return;
+        const source = from as RecipientField;
+        const split = (v?: string) => (v ?? "").split(",").map((s) => s.trim()).filter(Boolean);
+        const fromList = split(getValues(source));
+        const idx = fromList.findIndex((e) => e.toLowerCase() === email.toLowerCase());
+        if (idx === -1) return;
+        fromList.splice(idx, 1);
+        const toList = split(getValues(to));
+        if (!toList.some((e) => e.toLowerCase() === email.toLowerCase())) toList.push(email);
+        const opts = { shouldDirty: true, shouldValidate: !!(errors[source] || errors[to]) };
+        setValue(source, fromList.join(", "), opts);
+        setValue(to, toList.join(", "), opts);
+        if (to === "bcc") setShowBcc(true);
+    };
+
+    const handleDiscard = () => {
+        handleClear();
+        setShowBcc(false);
+        toast({ title: "Draft discarded" });
+    };
+
     // Live recipient count for the Send Separately hint
     const toValue = watch("to") ?? "";
     const recipientCount = toValue
@@ -287,6 +395,9 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
         .map((s) => s.trim())
         .filter(Boolean).length;
     const sendSeparately = watch("sendSeparately");
+    // Bcc row shows once asked for, or when a restored draft already has Bcc recipients.
+    const hydrated = useHydrated();
+    const bccVisible = showBcc || (hydrated && !!watch("bcc"));
 
     // ── Custom template variables ──────────────────────────────────────
     // Detect [Placeholders] in subject + body that aren't auto-resolved, so
@@ -340,53 +451,173 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.3 }}
             onSubmit={handleSubmit(onSubmit)}
-            className="bg-card rounded-xl border border-border shadow-card"
+            className="bg-card rounded-2xl border border-border shadow-card"
         >
-            <div className="p-6 space-y-4">
-                {/* To */}
-                <div className="space-y-1.5">
-                    <Label htmlFor="to">
-                        To <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                        id="to"
-                        placeholder="recipient@example.com, another@example.com"
-                        {...register("to")}
-                        aria-invalid={!!errors.to}
-                        className={errors.to ? "border-destructive focus-visible:ring-destructive" : ""}
-                    />
-                    {errors.to && <p className="text-xs text-destructive">{errors.to.message}</p>}
+            {/* ─── Header: From · Send separately · Discard (Outlook style) ─── */}
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-3">
+                <div className="flex min-w-0 items-center gap-1.5 text-sm">
+                    <span className="font-semibold text-foreground">From:</span>
+                    {sender ? (
+                        <span className="truncate text-foreground" title={`${sender.name} <${sender.email}>`}>
+                            {sender.email}
+                        </span>
+                    ) : (
+                        <Link href="/settings?tab=mail" className="truncate text-primary hover:underline">
+                            Set up a sender in Settings
+                        </Link>
+                    )}
                 </div>
-
-                {/* CC / BCC + Send-separately toggles share a row */}
-                <div className="flex items-center justify-between gap-3 flex-wrap">
-                    <button
-                        type="button"
-                        onClick={() => setShowCcBcc((v) => !v)}
-                        className="text-xs text-primary hover:underline flex items-center gap-1"
-                    >
-                        {showCcBcc ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
-                        {showCcBcc ? "Hide CC / BCC" : "Add CC / BCC"}
-                    </button>
-
+                <div className="flex items-center gap-3">
                     <div className="flex items-center gap-2">
                         <Switch
                             id="send-separately"
-                            checked={!!sendSeparately}
+                            checked={hydrated && !!sendSeparately}
                             onCheckedChange={(v) => setValue("sendSeparately", v, { shouldDirty: true })}
                         />
-                        <Label
-                            htmlFor="send-separately"
-                            className="text-xs cursor-pointer flex items-center gap-1.5 select-none"
-                        >
-                            <Users className="w-3.5 h-3.5 text-muted-foreground" />
+                        <Label htmlFor="send-separately" className="flex cursor-pointer select-none items-center gap-1.5 text-xs">
+                            <Users className="h-3.5 w-3.5 text-muted-foreground" />
                             Send separately
                         </Label>
+                    </div>
+                    <span className="h-5 w-px bg-border" aria-hidden="true" />
+                    <TooltipProvider delayDuration={300}>
+                        <Tooltip>
+                            <TooltipTrigger asChild>
+                                <Button
+                                    type="button"
+                                    variant="ghost"
+                                    size="icon-sm"
+                                    onClick={handleDiscard}
+                                    aria-label="Discard"
+                                    className="text-destructive hover:bg-destructive/10 hover:text-destructive"
+                                >
+                                    <Trash2 className="h-4 w-4" />
+                                </Button>
+                            </TooltipTrigger>
+                            <TooltipContent side="bottom"><p className="text-xs">Discard</p></TooltipContent>
+                        </Tooltip>
+                    </TooltipProvider>
+                </div>
+            </div>
+
+            <div className="space-y-4 p-5">
+                {/* ─── Recipients + subject: label buttons and underline fields ─── */}
+                <div className="space-y-2.5">
+                    <RecipientRow
+                        id="to"
+                        label="To"
+                        error={errors.to?.message}
+                        input={
+                            <Controller
+                                name="to"
+                                control={control}
+                                render={({ field }) => (
+                                    <RecipientInput
+                                        id="to"
+                                        onRecipientDrop={(email, from) => moveRecipient(email, from, "to")}
+                                        value={field.value ?? ""}
+                                        onChange={field.onChange}
+                                        contacts={contacts}
+                                        internalDomain={senderDomain}
+                                        invalid={!!errors.to}
+                                    />
+                                )}
+                            />
+                        }
+                        trailing={
+                            !bccVisible && (
+                                <button
+                                    type="button"
+                                    onClick={() => setShowBcc(true)}
+                                    onDragOver={(e) => {
+                                        if (!isRecipientDrag(e)) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        e.dataTransfer.dropEffect = "move";
+                                    }}
+                                    onDrop={(e) => {
+                                        const drag = readRecipientDrag(e);
+                                        if (!drag) return;
+                                        e.preventDefault();
+                                        e.stopPropagation();
+                                        moveRecipient(drag.email, drag.from, "bcc");
+                                    }}
+                                    title="Show Bcc (or drop an address here)"
+                                    className="absolute right-1 top-[18px] -translate-y-1/2 rounded px-1.5 py-0.5 text-xs font-medium text-muted-foreground hover:text-foreground"
+                                >
+                                    Bcc
+                                </button>
+                            )
+                        }
+                    />
+                    <RecipientRow
+                        id="cc"
+                        label="Cc"
+                        error={errors.cc?.message}
+                        input={
+                            <Controller
+                                name="cc"
+                                control={control}
+                                render={({ field }) => (
+                                    <RecipientInput
+                                        id="cc"
+                                        onRecipientDrop={(email, from) => moveRecipient(email, from, "cc")}
+                                        value={field.value ?? ""}
+                                        onChange={field.onChange}
+                                        contacts={contacts}
+                                        internalDomain={senderDomain}
+                                        invalid={!!errors.cc}
+                                    />
+                                )}
+                            />
+                        }
+                    />
+                    {bccVisible && (
+                        <RecipientRow
+                            id="bcc"
+                            label="Bcc"
+                            error={errors.bcc?.message}
+                            input={
+                            <Controller
+                                name="bcc"
+                                control={control}
+                                render={({ field }) => (
+                                    <RecipientInput
+                                        id="bcc"
+                                        onRecipientDrop={(email, from) => moveRecipient(email, from, "bcc")}
+                                        value={field.value ?? ""}
+                                        onChange={field.onChange}
+                                        contacts={contacts}
+                                        internalDomain={senderDomain}
+                                        invalid={!!errors.bcc}
+                                        autoFocus={showBcc}
+                                    />
+                                )}
+                            />
+                        }
+                        />
+                    )}
+                    <div className="relative pt-1">
+                        <input
+                            id="subject"
+                            placeholder="Add a subject"
+                            aria-label="Subject"
+                            autoComplete="off"
+                            {...register("subject")}
+                            aria-invalid={!!errors.subject}
+                            className={cn(underlineInput(!!errors.subject), "pr-40")}
+                        />
+                        {draftSavedAt && (
+                            <span className="pointer-events-none absolute right-1 top-[22px] -translate-y-1/2 text-xs text-muted-foreground">
+                                Draft saved at {draftSavedAt}
+                            </span>
+                        )}
+                        {errors.subject && <p className="mt-1 text-xs text-destructive">{errors.subject.message}</p>}
                     </div>
                 </div>
 
                 {/* Send-separately context callout */}
-                {sendSeparately && (
+                {hydrated && sendSeparately && (
                     <motion.div
                         initial={{ opacity: 0, y: -4 }}
                         animate={{ opacity: 1, y: 0 }}
@@ -410,38 +641,6 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                         </div>
                     </motion.div>
                 )}
-
-                {showCcBcc && (
-                    <div className="space-y-4">
-                        <div className="space-y-1.5">
-                            <Label htmlFor="cc">CC</Label>
-                            <Input id="cc" placeholder="cc@example.com" {...register("cc")} aria-invalid={!!errors.cc}
-                                className={errors.cc ? "border-destructive focus-visible:ring-destructive" : ""} />
-                            {errors.cc && <p className="text-xs text-destructive">{errors.cc.message}</p>}
-                        </div>
-                        <div className="space-y-1.5">
-                            <Label htmlFor="bcc">BCC</Label>
-                            <Input id="bcc" placeholder="bcc@example.com" {...register("bcc")} aria-invalid={!!errors.bcc}
-                                className={errors.bcc ? "border-destructive focus-visible:ring-destructive" : ""} />
-                            {errors.bcc && <p className="text-xs text-destructive">{errors.bcc.message}</p>}
-                        </div>
-                    </div>
-                )}
-
-                {/* Subject */}
-                <div className="space-y-1.5">
-                    <Label htmlFor="subject">
-                        Subject <span className="text-destructive">*</span>
-                    </Label>
-                    <Input
-                        id="subject"
-                        placeholder="Email subject"
-                        {...register("subject")}
-                        aria-invalid={!!errors.subject}
-                        className={errors.subject ? "border-destructive focus-visible:ring-destructive" : ""}
-                    />
-                    {errors.subject && <p className="text-xs text-destructive">{errors.subject.message}</p>}
-                </div>
 
                 {/* Template variables panel — only shows when the template has unresolved placeholders */}
                 {customPlaceholders.length > 0 && (
@@ -514,9 +713,6 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
 
                 {/* Body — Tiptap rich editor */}
                 <div className="space-y-1.5">
-                    <Label>
-                        Message <span className="text-destructive">*</span>
-                    </Label>
                     <Controller
                         name="body"
                         control={control}
@@ -567,7 +763,10 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                 {watch("scheduledAt") && (
                     <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded-md px-3 py-2">
                         <Clock className="h-3.5 w-3.5 text-primary" />
-                        Scheduled for {new Date(watch("scheduledAt")!).toLocaleString()}
+                        Scheduled for{" "}
+                        <span className="font-medium text-foreground">
+                            {new Date(watch("scheduledAt")!).toLocaleString([], { weekday: "short", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" })}
+                        </span>
                         <button type="button" onClick={() => setValue("scheduledAt", "")} className="ml-auto hover:text-destructive">
                             <X className="h-3.5 w-3.5" />
                         </button>
@@ -576,13 +775,8 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
             </div>
 
             {/* Footer */}
-            <div className="flex items-center justify-between gap-4 px-6 py-4 border-t border-border bg-muted/30 rounded-b-xl">
+            <div className="flex items-center justify-between gap-4 px-5 py-4 border-t border-border bg-muted/30 rounded-b-2xl">
                 <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={handleClear}>
-                        <X className="w-4 h-4" />
-                        Clear
-                    </Button>
-
                     {/* Schedule send */}
                     <Popover open={scheduleOpen} onOpenChange={setScheduleOpen}>
                         <PopoverTrigger asChild>
@@ -591,21 +785,21 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                                 Schedule
                             </Button>
                         </PopoverTrigger>
-                        <PopoverContent className="w-72 p-4 space-y-3" align="start">
-                            <p className="text-sm font-medium">Schedule Send</p>
-                            <div className="space-y-1.5">
-                                <Label htmlFor="schedule-dt" className="text-xs">Send at</Label>
-                                <input
-                                    id="schedule-dt"
-                                    type="datetime-local"
-                                    min={new Date().toISOString().slice(0, 16)}
-                                    className="w-full text-sm border border-border rounded-md px-3 py-2 bg-background focus:outline-none focus:ring-2 focus:ring-ring"
-                                    onChange={(e) => {
-                                        setValue("scheduledAt", e.target.value);
-                                        setScheduleOpen(false);
-                                    }}
-                                />
-                            </div>
+                        <PopoverContent
+                            className="w-auto overflow-hidden rounded-xl p-0"
+                            align="start"
+                            sideOffset={8}
+                            // Don't jump focus to the first quick pick (it looked pre-selected)
+                            onOpenAutoFocus={(e) => e.preventDefault()}
+                        >
+                            <SchedulePicker
+                                value={watch("scheduledAt")}
+                                onSchedule={(v) => {
+                                    setValue("scheduledAt", v, { shouldDirty: true });
+                                    setScheduleOpen(false);
+                                }}
+                                onCancel={() => setScheduleOpen(false)}
+                            />
                         </PopoverContent>
                     </Popover>
                 </div>

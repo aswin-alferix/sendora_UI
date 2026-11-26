@@ -1,53 +1,51 @@
 "use client";
 
-import { ReactNode } from "react";
 import { motion } from "framer-motion";
+import type { LucideIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 
+export type StatTone = "primary" | "success" | "warning" | "destructive";
+
+const tones: Record<StatTone, { bar: string; tile: string }> = {
+    primary: { bar: "before:bg-primary", tile: "bg-primary" },
+    success: { bar: "before:bg-success", tile: "bg-success" },
+    warning: { bar: "before:bg-warning", tile: "bg-warning" },
+    destructive: { bar: "before:bg-destructive", tile: "bg-destructive" },
+};
+
 interface StatCardProps {
-    icon: ReactNode;
+    icon: LucideIcon;
     label: string;
     value: string | number;
-    change?: {
-        value: string;
-        positive: boolean;
-    };
+    /** Small line under the value ("All time", "Need a retry"…). */
+    hint?: string;
+    tone?: StatTone;
     className?: string;
 }
 
-export function StatCard({ icon, label, value, change, className }: StatCardProps) {
+/** KPI card: coloured top edge, uppercase label, solid icon tile, big number. */
+export function StatCard({ icon: Icon, label, value, hint, tone = "primary", className }: StatCardProps) {
+    const t = tones[tone];
     return (
         <motion.div
-            initial={{ opacity: 0, y: 10 }}
+            initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
-            whileHover={{ y: -2 }}
             transition={{ duration: 0.2 }}
             className={cn(
-                "bg-card rounded-xl border border-border p-6 shadow-card hover:shadow-md transition-shadow",
+                "relative overflow-hidden rounded-2xl border border-border bg-card p-5 shadow-card",
+                "before:absolute before:inset-x-0 before:top-0 before:h-[3px]",
+                t.bar,
                 className
             )}
         >
-            <div className="flex items-start justify-between">
-                <div className="flex items-center justify-center w-12 h-12 rounded-lg bg-accent">
-                    {icon}
-                </div>
-                {change && (
-                    <span
-                        className={cn(
-                            "text-body-sm font-medium px-2 py-1 rounded-md",
-                            change.positive
-                                ? "bg-success/10 text-success"
-                                : "bg-destructive/10 text-destructive"
-                        )}
-                    >
-                        {change.positive ? "+" : ""}{change.value}
-                    </span>
-                )}
+            <div className="flex items-start justify-between gap-3">
+                <p className="pt-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</p>
+                <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-white shadow-sm", t.tile)}>
+                    <Icon className="h-[18px] w-[18px]" aria-hidden="true" />
+                </span>
             </div>
-            <div className="mt-4">
-                <p className="text-body-sm text-muted-foreground">{label}</p>
-                <p className="text-heading-2 font-heading text-foreground mt-1">{value}</p>
-            </div>
+            <p className="mt-2 text-2xl font-bold tabular-nums tracking-tight text-foreground">{value}</p>
+            {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
         </motion.div>
     );
 }

@@ -239,7 +239,7 @@ export function MailProviderConfig() {
         <div className="space-y-7">
             {/* Header */}
             <div>
-                <h3 className="text-heading-4 font-heading mb-1">Mail Provider</h3>
+                <h3 className="text-base font-semibold mb-1">Mail Provider</h3>
                 <p className="text-body-sm text-muted-foreground">
                     Choose how Sendora sends outgoing email. Each user can pick their own provider and
                     enter the credentials for their account.

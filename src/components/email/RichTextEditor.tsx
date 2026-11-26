@@ -47,7 +47,6 @@ import {
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { ScrollArea } from "@/components/ui/scroll-area";
 import {
     Tooltip, TooltipContent, TooltipProvider, TooltipTrigger,
 } from "@/components/ui/tooltip";
@@ -55,6 +54,12 @@ import {
     Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
+
+/** Shared classes for the editable area: placeholder text + wrap long words/URLs instead of overflowing. */
+const EDITOR_CONTENT_CLASSES =
+    "[&_.tiptap]:outline-none [&_.tiptap]:[overflow-wrap:anywhere] " +
+    "[&_.tiptap_p.is-empty::before]:text-muted-foreground/50 [&_.tiptap_p.is-empty::before]:content-[attr(data-placeholder)] " +
+    "[&_.tiptap_p.is-empty::before]:pointer-events-none [&_.tiptap_p.is-empty::before]:float-left [&_.tiptap_p.is-empty::before]:h-0";
 
 const textColors = [
     { name: "Black", value: "#000000" },
@@ -204,7 +209,7 @@ export function RichTextEditor({
         content,
         editorProps: {
             attributes: {
-                class: `outline-none p-3 text-sm min-h-[${minHeight}] prose prose-sm dark:prose-invert max-w-none`,
+                class: "outline-none px-4 py-3 text-sm prose prose-sm dark:prose-invert max-w-none",
                 "data-placeholder": placeholder,
             },
             handleDOMEvents: {
@@ -302,8 +307,8 @@ export function RichTextEditor({
     if (compact) {
         return (
             <TooltipProvider delayDuration={300}>
-                <div className="rounded-lg border border-border bg-card flex flex-col overflow-hidden">
-                    <div className="flex items-center gap-0.5 px-2 py-1 border-b border-border bg-muted/40">
+                <div className="h-full min-h-0 rounded-lg border border-border bg-card flex flex-col overflow-hidden">
+                    <div className="flex shrink-0 items-center gap-0.5 px-2 py-1 border-b border-border bg-muted/40">
                         <ToolbarBtn onClick={() => editor.chain().focus().undo().run()} tooltip="Undo">
                             <Undo2 className="h-3.5 w-3.5" />
                         </ToolbarBtn>
@@ -335,12 +340,13 @@ export function RichTextEditor({
                             <span className="font-serif text-[10px] font-medium">Aa</span>
                         </ToolbarBtn>
                     </div>
-                    <ScrollArea className="flex-1" style={{ minHeight }}>
+                    {/* Native scroll (not Radix ScrollArea): its display:table wrapper stops long words from wrapping */}
+                    <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
                         <EditorContent
                             editor={editor}
-                            className="[&_.tiptap]:outline-none [&_.tiptap]:min-h-[inherit] [&_.tiptap_p.is-empty::before]:text-muted-foreground/50 [&_.tiptap_p.is-empty::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-empty::before]:pointer-events-none [&_.tiptap_p.is-empty::before]:float-left [&_.tiptap_p.is-empty::before]:h-0"
+                            className={cn(EDITOR_CONTENT_CLASSES, "h-full [&_.tiptap]:min-h-full")}
                         />
-                    </ScrollArea>
+                    </div>
                 </div>
             </TooltipProvider>
         );
@@ -567,9 +573,12 @@ export function RichTextEditor({
                 </div>
 
                 {/* Editor area */}
-                <ScrollArea className="flex-1" style={{ minHeight }}>
-                    <EditorContent editor={editor} className="[&_.tiptap]:outline-none [&_.tiptap]:min-h-[inherit] [&_.tiptap_p.is-empty::before]:text-muted-foreground/50 [&_.tiptap_p.is-empty::before]:content-[attr(data-placeholder)] [&_.tiptap_p.is-empty::before]:pointer-events-none [&_.tiptap_p.is-empty::before]:float-left [&_.tiptap_p.is-empty::before]:h-0" />
-                </ScrollArea>
+                <div className="flex-1 overflow-x-hidden" style={{ minHeight }}>
+                    <EditorContent
+                        editor={editor}
+                        className={cn(EDITOR_CONTENT_CLASSES, "min-h-[inherit] [&_.tiptap]:min-h-[inherit]")}
+                    />
+                </div>
 
                 {uploading > 0 && (
                     <div className="border-t px-3 py-1.5 text-xs text-muted-foreground bg-muted/20">Uploading…</div>

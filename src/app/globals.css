@@ -1,8 +1,11 @@
 @import "tailwindcss";
 
 @theme {
-  --font-heading: Roboto, sans-serif;
-  --font-body: Inter, sans-serif;
+  /* Geist (same as Nexus-TG) is loaded by next/font in app/layout.tsx and exposed as --font-app.
+     (Roboto was never loaded, so headings fell back to a system font.) */
+  --font-sans: var(--font-app), ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-app), ui-sans-serif, system-ui, sans-serif;
+  --font-body: var(--font-app), ui-sans-serif, system-ui, sans-serif;
 
   --text-heading-1: 2.5rem;
   --text-heading-1--line-height: 1.2;
@@ -89,6 +92,10 @@
   --animate-scale-in: scale-in 0.2s ease-out;
   --animate-slide-in-right: slide-in-right 0.3s ease-out;
   --animate-shimmer: shimmer 2s infinite;
+  /* Toasts: springy slide-in from the right, quick fade-out */
+  --animate-toast-in: toast-in 0.45s cubic-bezier(0.16, 1, 0.3, 1);
+  --animate-toast-out: toast-out 0.2s cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-toast-swipe-out: toast-swipe-out 0.2s ease-out forwards;
 
   @keyframes accordion-down {
     from {
@@ -157,6 +164,42 @@
   @keyframes shimmer {
     100% {
       transform: translateX(100%);
+    }
+  }
+
+  @keyframes toast-in {
+    from {
+      opacity: 0;
+      transform: translateX(calc(100% + 1rem)) scale(0.96);
+    }
+
+    to {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+  }
+
+  @keyframes toast-out {
+    from {
+      opacity: 1;
+      transform: translateX(0) scale(1);
+    }
+
+    to {
+      opacity: 0;
+      transform: translateX(1.5rem) scale(0.96);
+    }
+  }
+
+  @keyframes toast-swipe-out {
+    from {
+      opacity: 1;
+      transform: translateX(var(--radix-toast-swipe-end-x));
+    }
+
+    to {
+      opacity: 0;
+      transform: translateX(calc(100% + 1rem));
     }
   }
 }
@@ -275,7 +318,12 @@
   h5,
   h6 {
     font-family: var(--font-heading);
-    @apply font-medium tracking-tight;
+    @apply font-semibold tracking-tight;
+  }
+
+  /* Lighter outline icons app-wide (lucide defaults to 2) */
+  svg.lucide {
+    stroke-width: 1.75;
   }
 }
 
