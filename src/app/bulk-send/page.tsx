@@ -8,11 +8,8 @@ import {
     FileText,
     Building2,
     Tags,
-    Users,
     Search,
     X,
-    Braces,
-    Eye,
     Send,
     Loader2,
     CheckCircle2,
@@ -21,6 +18,10 @@ import {
     RotateCcw,
     Briefcase,
     Mails,
+    Check,
+    ChevronLeft,
+    ChevronRight,
+    Paperclip,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/PageHeader";
 import { Button } from "@/components/ui/button";
@@ -57,7 +58,8 @@ import {
     substitute,
     appendSignatureIfMissing,
 } from "@/lib/mail/substitute";
-import type { UploadedFile } from "@/lib/files";
+import { formatBytes, type UploadedFile } from "@/lib/files";
+import { anyStatus, backend } from "@/lib/axios";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -84,6 +86,8 @@ interface Recipient {
     name: string;
     company: string;
 }
+
+type StepId = "template" | "audience" | "personalise" | "review";
 
 interface SendResult {
     email: string;
@@ -148,8 +152,13 @@ function BulkSendContent() {
     });
     const [loading, setLoading] = useState(true);
 
+    // Which step is open (a template passed in the URL starts on the audience step)
+    const [step, setStep] = useState<StepId>(() => (searchParams?.get("template") ? "audience" : "template"));
+    const [audienceTab, setAudienceTab] = useState<"filters" | "people" | "addresses">("filters");
+
     // Step 1 — template
     const [templateId, setTemplateId] = useState<string>(searchParams?.get("template") ?? "");
+    const [templateSearch, setTemplateSearch] = useState("");
 
     // Step 2 — audience
     const [selectedCompanies, setSelectedCompanies] = useState<Set<string>>(new Set());
@@ -181,15 +190,11 @@ function BulkSendContent() {
         (async () => {
             try {
                 const [tRes, cRes, sRes] = await Promise.all([
-                    fetch("/api/templates"),
-                    fetch("/api/contacts"),
-                    fetch("/api/signatures"),
+                    backend.get("/api/templates"),
+                    backend.get("/api/contacts"),
+                    backend.get("/api/signatures"),
                 ]);
-                const [tData, cData, sData] = await Promise.all([
-                    tRes.json().catch(() => ({})),
-                    cRes.json().catch(() => ({})),
-                    sRes.json().catch(() => ({})),
-                ]);
+                const [tData, cData, sData] = [tRes.data ?? {}, cRes.data ?? {}, sRes.data ?? {}];
                 if (cancelled) return;
                 setTemplates(
                     (tData.items ?? []).map((t: TemplateItem) => ({
@@ -265,6 +270,17 @@ function BulkSendContent() {
         contacts.forEach((c) => c.groups.forEach((g) => counts.set(g, (counts.get(g) ?? 0) + 1)));
         return [...counts.entries()].sort((a, b) => a[0].localeCompare(b[0]));
     }, [contacts]);
+
+    const filteredTemplates = useMemo(() => {
+        const q = templateSearch.trim().toLowerCase();
+        if (!q) return templates;
+        return templates.filter(
+            (t) =>
+                t.name.toLowerCase().includes(q) ||
+                t.subject.toLowerCase().includes(q) ||
+                t.description.toLowerCase().includes(q)
+        );
+    }, [templates, templateSearch]);
 
     const filteredContacts = useMemo(() => {
         const q = contactSearch.trim().toLowerCase();
@@ -435,13 +451,9 @@ function BulkSendContent() {
             let chunkResults: SendResult[];
             let fatal: string | null = null;
             try {
-                const res = await fetch("/api/send", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ ...base, to: chunk }),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (res.ok && res.status !== 207) {
+                const res = await backend.post("/api/send", { ...base, to: chunk }, anyStatus);
+                const data = res.data ?? {};
+                if (res.status >= 200 && res.status < 300 && res.status !== 207) {
                     chunkResults = chunk.map((email) => ({ email, ok: true }));
                 } else if (Array.isArray(data.failures)) {
                     // 207 (some failed) or 502 (all failed) from send-separately mode
@@ -505,6 +517,46 @@ function BulkSendContent() {
 
     const visibleRecipients = showAllRecipients ? recipients : recipients.slice(0, RECIPIENT_PREVIEW_LIMIT);
 
+    // ── Steps ─────────────────────────────────────────────────────────────
+    const hasPersonalise = customPlaceholders.length > 0;
+    const steps: { id: StepId; title: string; hint: string }[] = [
+        { id: "template", title: "Template", hint: template ? template.name : "Pick what to send" },
+        {
+            id: "audience",
+            title: "Audience",
+            hint: recipients.length ? `${recipients.length} recipient${recipients.length === 1 ? "" : "s"}` : "Who gets it",
+        },
+        ...(hasPersonalise
+            ? [{ id: "personalise" as StepId, title: "Personalise", hint: missingCustom.length ? `${missingCustom.length} to fill` : "All filled" }]
+            : []),
+        { id: "review", title: "Review & send", hint: "Preview, then send" },
+    ];
+    // Lock to the last step while a send is running or its results are on screen.
+    const activeId: StepId = sending || finished ? "review" : steps.some((s) => s.id === step) ? step : "review";
+    const activeIndex = steps.findIndex((s) => s.id === activeId);
+    const stepProblem = (id: StepId): string | null => {
+        if (id === "template") {
+            if (!template) return "Choose a template to continue";
+            if (!template.body.trim()) return "The chosen template has no message body";
+        }
+        if (id === "audience") {
+            if (recipients.length === 0) return "Pick at least one recipient";
+            if (invalidExtras.length) return `Fix ${invalidExtras.length} invalid email address(es)`;
+        }
+        if (id === "personalise" && missingCustom.length) {
+            return `Fill in ${missingCustom.map((k) => `[${k}]`).join(", ")}`;
+        }
+        return null;
+    };
+    // A step can be opened when every step before it is complete.
+    const canOpen = (index: number) => !sending && !finished && steps.slice(0, index).every((s) => !stepProblem(s.id));
+    const currentProblem = activeId === "review" ? null : stepProblem(activeId);
+    const nextStep = steps[activeIndex + 1];
+    const goTo = (index: number) => {
+        if (index >= 0 && index < steps.length && canOpen(index)) setStep(steps[index].id);
+    };
+    const attachmentBytes = template ? template.attachments.reduce((n, a) => n + a.size, 0) : 0;
+
     return (
         <div className="px-4 py-6 md:px-8">
             <PageHeader icon={Mails} title="Bulk Send" description="Send a template to organisations, groups or people in one go" />
@@ -513,46 +565,454 @@ function BulkSendContent() {
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.3 }}
-                className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]"
+                className="space-y-5"
             >
-                {/* ── Left: choose ─────────────────────────────────────── */}
-                <div className="space-y-5">
-                    {/* Step 1 — Template */}
-                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
-                        <StepTitle n={1} icon={FileText} title="Template" />
-                        {templates.length === 0 ? (
-                            <p className="text-sm text-muted-foreground">
-                                No templates yet.{" "}
-                                <Link href="/templates" className="text-primary hover:underline">
-                                    Create one
-                                </Link>{" "}
-                                first.
-                            </p>
-                        ) : (
+                {/* ── Step bar ─────────────────────────────────────────── */}
+                <nav aria-label="Steps" className="bg-card rounded-2xl border border-border shadow-card px-5 py-3.5">
+                    <ol className="flex flex-wrap items-center gap-3">
+                        {steps.map((s, i) => {
+                            const done = i < activeIndex;
+                            const current = i === activeIndex;
+                            return (
+                                <li key={s.id} className="flex flex-1 min-w-[150px] items-center gap-3 last:flex-none">
+                                    <button
+                                        type="button"
+                                        onClick={() => goTo(i)}
+                                        disabled={current || !canOpen(i)}
+                                        aria-current={current ? "step" : undefined}
+                                        className="flex items-center gap-2.5 rounded-lg text-left disabled:cursor-default enabled:hover:opacity-80"
+                                    >
+                                        <span
+                                            className={cn(
+                                                "w-7 h-7 shrink-0 rounded-full flex items-center justify-center text-xs font-semibold",
+                                                done && "bg-success text-success-foreground",
+                                                current && "bg-primary text-primary-foreground",
+                                                !done && !current && "border-2 border-border text-muted-foreground"
+                                            )}
+                                        >
+                                            {done ? <Check className="w-3.5 h-3.5" strokeWidth={3} /> : i + 1}
+                                        </span>
+                                        <span className="min-w-0">
+                                            <span className={cn("block text-sm font-semibold", current ? "text-primary" : !done && "text-muted-foreground")}>
+                                                {s.title}
+                                            </span>
+                                            <span className="block text-xs text-muted-foreground truncate max-w-[180px]">{s.hint}</span>
+                                        </span>
+                                    </button>
+                                    {i < steps.length - 1 && (
+                                        <span aria-hidden="true" className={cn("hidden sm:block h-0.5 flex-1 rounded", done ? "bg-success" : "bg-border")} />
+                                    )}
+                                </li>
+                            );
+                        })}
+                    </ol>
+                </nav>
+
+                <div className="flex flex-wrap items-start gap-5">
+                    {/* ── Current step ─────────────────────────────────── */}
+                    <section className="flex-[999_1_560px] min-w-0 bg-card rounded-2xl border border-border shadow-card p-5 md:p-6 space-y-5">
+                        {activeId === "template" && (
                             <>
-                                <Select value={templateId} onValueChange={setTemplateId} disabled={sending}>
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Choose a template" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {templates.map((t) => (
-                                            <SelectItem key={t.id} value={t.id}>
-                                                {t.name}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                                {template && (
-                                    <div className="text-xs text-muted-foreground space-y-1">
-                                        <p>
-                                            <span className="font-medium text-foreground">Subject:</span> {template.subject}
+                                <StepHeading title="Which template?" description="The template sets the subject, the message and any attachments." />
+                                {templates.length === 0 ? (
+                                    <p className="text-sm text-muted-foreground">
+                                        No templates yet.{" "}
+                                        <Link href="/templates" className="text-primary hover:underline">
+                                            Create one
+                                        </Link>{" "}
+                                        first.
+                                    </p>
+                                ) : (
+                                    <>
+                                    <div className="relative">
+                                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                        <Input
+                                            aria-label="Search templates"
+                                            placeholder="Search templates by name or subject…"
+                                            value={templateSearch}
+                                            onChange={(e) => setTemplateSearch(e.target.value)}
+                                            className="pl-9"
+                                        />
+                                    </div>
+                                    {filteredTemplates.length === 0 && (
+                                        <p className="text-sm text-muted-foreground">
+                                            No templates match &ldquo;{templateSearch.trim()}&rdquo;.
                                         </p>
-                                        {template.description && <p>{template.description}</p>}
-                                        {template.attachments.length > 0 && (
-                                            <p>
-                                                <span className="font-medium text-foreground">Attachments:</span>{" "}
-                                                {template.attachments.map((a) => a.filename).join(", ")}
+                                    )}
+                                    <div role="radiogroup" aria-label="Templates" className="grid gap-3 sm:grid-cols-2">
+                                        {filteredTemplates.map((t) => {
+                                            const on = t.id === templateId;
+                                            return (
+                                                <button
+                                                    key={t.id}
+                                                    type="button"
+                                                    role="radio"
+                                                    aria-checked={on}
+                                                    onClick={() => setTemplateId(t.id)}
+                                                    className={cn(
+                                                        "rounded-xl border p-4 text-left transition-colors",
+                                                        on ? "border-primary bg-primary/5 ring-1 ring-primary" : "border-border hover:border-primary/40"
+                                                    )}
+                                                >
+                                                    <span className="flex items-start justify-between gap-2">
+                                                        <span className="font-semibold text-sm">{t.name}</span>
+                                                        {on && <Check className="w-4 h-4 text-primary shrink-0" />}
+                                                    </span>
+                                                    <span className="mt-1 block text-xs text-muted-foreground truncate">
+                                                        Subject: {t.subject || "—"}
+                                                    </span>
+                                                    {t.description && (
+                                                        <span className="mt-1 block text-xs text-muted-foreground line-clamp-2">{t.description}</span>
+                                                    )}
+                                                    {t.attachments.length > 0 && (
+                                                        <span className="mt-2 inline-flex items-center gap-1 text-xs text-muted-foreground">
+                                                            <Paperclip className="w-3 h-3" />
+                                                            {t.attachments.length} attachment{t.attachments.length === 1 ? "" : "s"}
+                                                        </span>
+                                                    )}
+                                                </button>
+                                            );
+                                        })}
+                                    </div>
+                                    </>
+                                )}
+                            </>
+                        )}
+
+                        {activeId === "audience" && (
+                            <>
+                                <StepHeading
+                                    title="Who should get this email?"
+                                    description="Use filters, pick people, or paste addresses. Everything you choose is added together."
+                                />
+
+                                <div role="tablist" aria-label="Choose recipients by" className="inline-flex flex-wrap gap-1 rounded-lg bg-muted p-1">
+                                    {(
+                                        [
+                                            ["filters", "Filters"],
+                                            ["people", "Pick people"],
+                                            ["addresses", "Paste addresses"],
+                                        ] as const
+                                    ).map(([id, label]) => (
+                                        <button
+                                            key={id}
+                                            type="button"
+                                            role="tab"
+                                            aria-selected={audienceTab === id}
+                                            onClick={() => setAudienceTab(id)}
+                                            className={cn(
+                                                "rounded-md px-3.5 py-1.5 text-sm transition-colors",
+                                                audienceTab === id ? "bg-card font-semibold shadow-sm" : "text-muted-foreground hover:text-foreground"
+                                            )}
+                                        >
+                                            {label}
+                                        </button>
+                                    ))}
+                                </div>
+
+                                {audienceTab === "filters" && (
+                                    <div className="space-y-5">
+                                        {contacts.length === 0 && (
+                                            <p className="text-sm text-muted-foreground">
+                                                No contacts yet —{" "}
+                                                <Link href="/contacts" className="text-primary hover:underline">
+                                                    add contacts
+                                                </Link>{" "}
+                                                with a company to send by organisation, or paste addresses instead.
                                             </p>
+                                        )}
+                                        {companies.length > 0 && (
+                                            <ChipPicker
+                                                label="Organisations"
+                                                icon={Building2}
+                                                items={companies}
+                                                selected={selectedCompanies}
+                                                onToggle={(v) => setSelectedCompanies((s) => toggleInSet(s, v))}
+                                                onAll={() =>
+                                                    setSelectedCompanies(
+                                                        selectedCompanies.size === companies.length
+                                                            ? new Set()
+                                                            : new Set(companies.map(([c]) => c))
+                                                    )
+                                                }
+                                            />
+                                        )}
+                                        {roles.length > 0 && (
+                                            <ChipPicker
+                                                label="Roles"
+                                                icon={Briefcase}
+                                                items={roles}
+                                                selected={selectedRoles}
+                                                onToggle={(v) => setSelectedRoles((s) => toggleInSet(s, v))}
+                                                onAll={() =>
+                                                    setSelectedRoles(
+                                                        selectedRoles.size === roles.length ? new Set() : new Set(roles.map(([r]) => r))
+                                                    )
+                                                }
+                                            />
+                                        )}
+                                        {filterSummary && (
+                                            <div className="rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm">
+                                                <span className="font-semibold">{filterSummary}</span>
+                                                {(selectedCompanies.size === 0 || selectedRoles.size === 0) &&
+                                                    companies.length > 0 &&
+                                                    roles.length > 0 && (
+                                                        <span className="text-muted-foreground"> — pick both an organisation and a role to narrow it down.</span>
+                                                    )}
+                                            </div>
+                                        )}
+                                        {groups.length > 0 && (
+                                            <ChipPicker
+                                                label="Groups"
+                                                icon={Tags}
+                                                items={groups}
+                                                selected={selectedGroups}
+                                                onToggle={(v) => setSelectedGroups((s) => toggleInSet(s, v))}
+                                                onAll={() =>
+                                                    setSelectedGroups(
+                                                        selectedGroups.size === groups.length ? new Set() : new Set(groups.map(([g]) => g))
+                                                    )
+                                                }
+                                            />
+                                        )}
+                                    </div>
+                                )}
+
+                                {audienceTab === "people" && (
+                                    <div className="space-y-2">
+                                        {contacts.length === 0 ? (
+                                            <p className="text-sm text-muted-foreground">
+                                                No contacts yet —{" "}
+                                                <Link href="/contacts" className="text-primary hover:underline">
+                                                    add contacts
+                                                </Link>{" "}
+                                                first, or paste addresses instead.
+                                            </p>
+                                        ) : (
+                                            <>
+                                                <div className="relative">
+                                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
+                                                    <Input
+                                                        aria-label="Search contacts"
+                                                        placeholder="Search by name, email or company…"
+                                                        value={contactSearch}
+                                                        onChange={(e) => setContactSearch(e.target.value)}
+                                                        className="pl-9"
+                                                    />
+                                                </div>
+                                                <div className="max-h-80 overflow-y-auto rounded-md border border-border divide-y divide-border">
+                                                    {filteredContacts.length === 0 ? (
+                                                        <p className="p-3 text-xs text-muted-foreground">No matching contacts.</p>
+                                                    ) : (
+                                                        filteredContacts.map((c) => (
+                                                            <label
+                                                                key={c.id}
+                                                                className="flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-muted/40"
+                                                            >
+                                                                <Checkbox
+                                                                    checked={selectedContactIds.has(c.id)}
+                                                                    onCheckedChange={() => setSelectedContactIds((s) => toggleInSet(s, c.id))}
+                                                                />
+                                                                <span className="min-w-0 flex-1">
+                                                                    <span className="font-medium">{c.name || c.email}</span>
+                                                                    <span className="block text-xs text-muted-foreground truncate">
+                                                                        {c.email}
+                                                                        {c.company ? ` · ${c.company}` : ""}
+                                                                        {c.role ? ` · ${c.role}` : ""}
+                                                                    </span>
+                                                                </span>
+                                                            </label>
+                                                        ))
+                                                    )}
+                                                </div>
+                                                {selectedContactIds.size > 0 && (
+                                                    <p className="text-xs text-muted-foreground">{selectedContactIds.size} picked by hand</p>
+                                                )}
+                                            </>
+                                        )}
+                                    </div>
+                                )}
+
+                                {audienceTab === "addresses" && (
+                                    <div className="space-y-1.5">
+                                        <Label htmlFor="extra-emails">Email addresses</Label>
+                                        <Textarea
+                                            id="extra-emails"
+                                            rows={4}
+                                            placeholder="someone@example.com, another@example.com"
+                                            value={extraEmails}
+                                            onChange={(e) => setExtraEmails(e.target.value)}
+                                        />
+                                        <p className="text-xs text-muted-foreground">Separate with commas, spaces or new lines.</p>
+                                        {invalidExtras.length > 0 && (
+                                            <p className="text-xs text-destructive">Not valid: {invalidExtras.join(", ")}</p>
+                                        )}
+                                    </div>
+                                )}
+
+                                {/* Everyone chosen so far, from all three tabs */}
+                                <div className="rounded-lg bg-muted/40 border border-border p-3 space-y-2">
+                                    <div className="flex items-center justify-between gap-2">
+                                        <p className="text-sm">
+                                            <span className="font-semibold">{recipients.length}</span> recipient{recipients.length === 1 ? "" : "s"}
+                                            {orgCount > 0 && (
+                                                <>
+                                                    {" "}across <span className="font-semibold">{orgCount}</span> organisation{orgCount === 1 ? "" : "s"}
+                                                </>
+                                            )}
+                                        </p>
+                                        {excluded.size > 0 && (
+                                            <button
+                                                type="button"
+                                                className="text-xs text-primary hover:underline"
+                                                onClick={() => setExcluded(new Set())}
+                                            >
+                                                Restore {excluded.size} removed
+                                            </button>
+                                        )}
+                                    </div>
+                                    {recipients.length > 0 && (
+                                        <div className="flex flex-wrap gap-1.5">
+                                            {visibleRecipients.map((r) => (
+                                                <span
+                                                    key={r.email}
+                                                    className="inline-flex items-center gap-1 rounded-full border border-border bg-card pl-2.5 pr-1 py-0.5 text-xs"
+                                                    title={r.company ? `${r.email} · ${r.company}` : r.email}
+                                                >
+                                                    {r.name || r.email}
+                                                    <button
+                                                        type="button"
+                                                        aria-label={`Remove ${r.email}`}
+                                                        className="rounded-full p-0.5 hover:bg-muted"
+                                                        onClick={() => setExcluded((s) => new Set(s).add(r.email.toLowerCase()))}
+                                                    >
+                                                        <X className="w-3 h-3" />
+                                                    </button>
+                                                </span>
+                                            ))}
+                                            {recipients.length > RECIPIENT_PREVIEW_LIMIT && (
+                                                <button
+                                                    type="button"
+                                                    className="text-xs text-primary hover:underline px-1"
+                                                    onClick={() => setShowAllRecipients((v) => !v)}
+                                                >
+                                                    {showAllRecipients ? "Show fewer" : `+${recipients.length - RECIPIENT_PREVIEW_LIMIT} more`}
+                                                </button>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            </>
+                        )}
+
+                        {activeId === "personalise" && (
+                            <>
+                                <StepHeading
+                                    title="Fill in placeholders"
+                                    description="These aren't filled in automatically. The same value is used for every recipient."
+                                />
+                                <div className="grid gap-4 sm:grid-cols-2">
+                                    {customPlaceholders.map((key) => (
+                                        <div key={key} className="space-y-1.5">
+                                            <Label htmlFor={`var-${key}`} className="font-mono text-xs">
+                                                [{key}]
+                                            </Label>
+                                            <Input
+                                                id={`var-${key}`}
+                                                value={customVariables[key] ?? ""}
+                                                onChange={(e) => setCustomVariables((prev) => ({ ...prev, [key]: e.target.value }))}
+                                            />
+                                        </div>
+                                    ))}
+                                </div>
+                                <p className="text-xs text-muted-foreground">
+                                    [Name], [Company] and the other standard placeholders are filled in for each person automatically.
+                                </p>
+                            </>
+                        )}
+
+                        {activeId === "review" && (
+                            <>
+                                <div className="flex flex-wrap items-start justify-between gap-3">
+                                    <StepHeading title="Review & send" description="Check the email as one recipient will see it." />
+                                    {recipients.length > 1 && (
+                                        <Select value={previewRecipient?.email ?? ""} onValueChange={setPreviewEmail}>
+                                            <SelectTrigger className="w-64 h-9 text-xs" aria-label="Preview as">
+                                                <SelectValue placeholder="Preview as…" />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {recipients.slice(0, 100).map((r) => (
+                                                    <SelectItem key={r.email} value={r.email} className="text-xs">
+                                                        {r.name ? `${r.name} — ${r.email}` : r.email}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                    )}
+                                </div>
+
+                                {!preview ? (
+                                    <p className="text-sm text-muted-foreground">Choose a template to see the email.</p>
+                                ) : (
+                                    <div className="rounded-lg border border-border overflow-hidden">
+                                        <div className="px-4 py-3 border-b border-border bg-muted/30 text-xs space-y-1">
+                                            <p>
+                                                <span className="text-muted-foreground w-14 inline-block">From</span>
+                                                {mailConfig?.fromName ? `${mailConfig.fromName} <${mailConfig.fromEmail}>` : "—"}
+                                            </p>
+                                            <p>
+                                                <span className="text-muted-foreground w-14 inline-block">To</span>
+                                                {preview.to}
+                                            </p>
+                                            <p className="font-medium text-sm pt-1">
+                                                <span dangerouslySetInnerHTML={{ __html: highlightPlaceholders(preview.subject) }} />
+                                            </p>
+                                        </div>
+                                        <div
+                                            className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-relaxed p-4 max-h-[460px] overflow-y-auto"
+                                            dangerouslySetInnerHTML={{ __html: highlightPlaceholders(preview.html) }}
+                                        />
+                                    </div>
+                                )}
+
+                                {!sending && !finished && blockers.length > 0 && (
+                                    <div className="rounded-lg border border-warning/40 bg-warning/10 p-3">
+                                        <p className="text-sm font-medium">Before you can send</p>
+                                        <ul className="mt-1 text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
+                                            {blockers.map((b) => (
+                                                <li key={b}>{b}</li>
+                                            ))}
+                                        </ul>
+                                    </div>
+                                )}
+
+                                {(sending || finished) && (
+                                    <div className="space-y-3 rounded-lg border border-border p-4">
+                                        <div className="flex items-center justify-between text-sm">
+                                            <span className="font-medium">
+                                                {sending ? `Sending ${done} of ${total}…` : `Finished: ${done} of ${total}`}
+                                            </span>
+                                            <span className="text-muted-foreground">{total ? Math.round((done / total) * 100) : 0}%</span>
+                                        </div>
+                                        <Progress value={total ? (done / total) * 100 : 0} />
+                                        <div className="flex items-center gap-4 text-sm">
+                                            <span className="flex items-center gap-1.5 text-success">
+                                                <CheckCircle2 className="w-4 h-4" /> {sentCount} sent
+                                            </span>
+                                            <span className="flex items-center gap-1.5 text-destructive">
+                                                <AlertCircle className="w-4 h-4" /> {failedResults.length} failed
+                                            </span>
+                                        </div>
+                                        {stoppedReason && <p className="text-xs text-destructive">{stoppedReason}</p>}
+                                        {failedResults.length > 0 && (
+                                            <div className="max-h-40 overflow-y-auto rounded-md border border-destructive/20 bg-destructive/5 p-2 space-y-1">
+                                                {failedResults.map((r) => (
+                                                    <p key={r.email} className="text-xs">
+                                                        <span className="font-medium">{r.email}</span>{" "}
+                                                        <span className="text-muted-foreground">— {r.error}</span>
+                                                    </p>
+                                                ))}
+                                            </div>
                                         )}
                                     </div>
                                 )}
@@ -560,386 +1020,140 @@ function BulkSendContent() {
                         )}
                     </section>
 
-                    {/* Step 2 — Audience */}
-                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-5">
-                        <StepTitle n={2} icon={Users} title="Recipients" />
-
-                        {contacts.length === 0 && (
-                            <p className="text-sm text-muted-foreground">
-                                No contacts yet —{" "}
-                                <Link href="/contacts" className="text-primary hover:underline">
-                                    add contacts
-                                </Link>{" "}
-                                with a company to send by organisation, or type addresses below.
-                            </p>
-                        )}
-
-                        {companies.length > 0 && (
-                            <ChipPicker
-                                label="Organisations"
-                                icon={Building2}
-                                items={companies}
-                                selected={selectedCompanies}
-                                disabled={sending}
-                                onToggle={(v) => setSelectedCompanies((s) => toggleInSet(s, v))}
-                                onAll={() =>
-                                    setSelectedCompanies(
-                                        selectedCompanies.size === companies.length
-                                            ? new Set()
-                                            : new Set(companies.map(([c]) => c))
-                                    )
-                                }
-                            />
-                        )}
-
-                        {roles.length > 0 && (
-                            <ChipPicker
-                                label="Roles"
-                                icon={Briefcase}
-                                items={roles}
-                                selected={selectedRoles}
-                                disabled={sending}
-                                onToggle={(v) => setSelectedRoles((s) => toggleInSet(s, v))}
-                                onAll={() =>
-                                    setSelectedRoles(
-                                        selectedRoles.size === roles.length
-                                            ? new Set()
-                                            : new Set(roles.map(([r]) => r))
-                                    )
-                                }
-                            />
-                        )}
-
-                        {filterSummary && (
-                            <p className="text-xs text-muted-foreground -mt-2">
-                                Sending to: <span className="font-medium text-foreground">{filterSummary}</span>
-                                {(selectedCompanies.size === 0 || selectedRoles.size === 0) &&
-                                    companies.length > 0 &&
-                                    roles.length > 0 && (
-                                        <> — pick both an organisation and a role to narrow it down.</>
-                                    )}
-                            </p>
-                        )}
-
-                        {groups.length > 0 && (
-                            <ChipPicker
-                                label="Groups"
-                                icon={Tags}
-                                items={groups}
-                                selected={selectedGroups}
-                                disabled={sending}
-                                onToggle={(v) => setSelectedGroups((s) => toggleInSet(s, v))}
-                                onAll={() =>
-                                    setSelectedGroups(
-                                        selectedGroups.size === groups.length
-                                            ? new Set()
-                                            : new Set(groups.map(([g]) => g))
-                                    )
-                                }
-                            />
-                        )}
-
-                        {contacts.length > 0 && (
-                            <div className="space-y-2">
-                                <Label className="flex items-center gap-1.5">
-                                    <Users className="w-3.5 h-3.5 text-muted-foreground" />
-                                    Individual contacts
-                                </Label>
-                                <div className="relative">
-                                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-                                    <Input
-                                        placeholder="Search by name, email or company…"
-                                        value={contactSearch}
-                                        onChange={(e) => setContactSearch(e.target.value)}
-                                        className="pl-9"
-                                    />
-                                </div>
-                                <div className="max-h-56 overflow-y-auto rounded-md border border-border divide-y divide-border">
-                                    {filteredContacts.length === 0 ? (
-                                        <p className="p-3 text-xs text-muted-foreground">No matching contacts.</p>
-                                    ) : (
-                                        filteredContacts.map((c) => (
-                                            <label
-                                                key={c.id}
-                                                className="flex items-center gap-3 px-3 py-2 text-sm cursor-pointer hover:bg-muted/40"
-                                            >
-                                                <Checkbox
-                                                    checked={selectedContactIds.has(c.id)}
-                                                    disabled={sending}
-                                                    onCheckedChange={() =>
-                                                        setSelectedContactIds((s) => toggleInSet(s, c.id))
-                                                    }
-                                                />
-                                                <span className="min-w-0 flex-1">
-                                                    <span className="font-medium">{c.name || c.email}</span>
-                                                    <span className="block text-xs text-muted-foreground truncate">
-                                                        {c.email}
-                                                        {c.company ? ` · ${c.company}` : ""}
-                                                    </span>
-                                                </span>
-                                            </label>
-                                        ))
-                                    )}
-                                </div>
+                    {/* ── Summary ──────────────────────────────────────── */}
+                    <aside className="flex-[1_1_300px] min-w-0 space-y-4 lg:sticky lg:top-6">
+                        <div className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
+                            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Summary</p>
+                            <div className="flex items-baseline gap-2">
+                                <span className="text-4xl font-bold leading-none">{recipients.length}</span>
+                                <span className="text-sm text-muted-foreground">recipient{recipients.length === 1 ? "" : "s"}</span>
                             </div>
-                        )}
-
-                        <div className="space-y-1.5">
-                            <Label htmlFor="extra-emails">Other email addresses</Label>
-                            <Textarea
-                                id="extra-emails"
-                                rows={2}
-                                placeholder="someone@example.com, another@example.com"
-                                value={extraEmails}
-                                disabled={sending}
-                                onChange={(e) => setExtraEmails(e.target.value)}
-                            />
-                            {invalidExtras.length > 0 && (
-                                <p className="text-xs text-destructive">
-                                    Not valid: {invalidExtras.join(", ")}
-                                </p>
-                            )}
-                        </div>
-
-                        {/* Summary */}
-                        <div className="rounded-lg bg-muted/40 border border-border p-3 space-y-2">
-                            <div className="flex items-center justify-between gap-2">
-                                <p className="text-sm">
-                                    <span className="font-semibold">{recipients.length}</span>{" "}
-                                    recipient{recipients.length === 1 ? "" : "s"}
-                                    {orgCount > 0 && (
-                                        <>
-                                            {" "}across <span className="font-semibold">{orgCount}</span>{" "}
-                                            organisation{orgCount === 1 ? "" : "s"}
-                                        </>
-                                    )}
-                                </p>
-                                {excluded.size > 0 && (
-                                    <button
-                                        type="button"
-                                        className="text-xs text-primary hover:underline"
-                                        onClick={() => setExcluded(new Set())}
-                                        disabled={sending}
-                                    >
-                                        Restore {excluded.size} removed
-                                    </button>
-                                )}
-                            </div>
-                            {recipients.length > 0 && (
-                                <div className="flex flex-wrap gap-1.5">
-                                    {visibleRecipients.map((r) => (
-                                        <span
-                                            key={r.email}
-                                            className="inline-flex items-center gap-1 rounded-full border border-border bg-card pl-2.5 pr-1 py-0.5 text-xs"
-                                            title={r.company ? `${r.email} · ${r.company}` : r.email}
-                                        >
-                                            {r.name || r.email}
+                            <dl className="space-y-1.5 text-sm">
+                                <div className="flex justify-between gap-2">
+                                    <dt className="text-muted-foreground">Organisations</dt>
+                                    <dd>{orgCount}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                    <dt className="text-muted-foreground">Picked by hand</dt>
+                                    <dd>{selectedContactIds.size}</dd>
+                                </div>
+                                <div className="flex justify-between gap-2">
+                                    <dt className="text-muted-foreground">Removed</dt>
+                                    <dd>{excluded.size}</dd>
+                                </div>
+                            </dl>
+                            <div className="h-px bg-border" />
+                            {template ? (
+                                <div className="flex items-start gap-3">
+                                    <span className="w-11 h-11 shrink-0 rounded-lg bg-primary/10 text-primary flex items-center justify-center">
+                                        <FileText className="w-5 h-5" />
+                                    </span>
+                                    <div className="min-w-0">
+                                        <p className="text-sm font-semibold truncate">{template.name}</p>
+                                        <p className="text-xs text-muted-foreground">
+                                            {template.attachments.length
+                                                ? `${template.attachments.length} attachment${template.attachments.length === 1 ? "" : "s"} · ${formatBytes(attachmentBytes)}`
+                                                : "No attachments"}
+                                        </p>
+                                        {activeId !== "template" && !sending && !finished && (
                                             <button
                                                 type="button"
-                                                aria-label={`Remove ${r.email}`}
-                                                disabled={sending}
-                                                className="rounded-full p-0.5 hover:bg-muted"
-                                                onClick={() =>
-                                                    setExcluded((s) => new Set(s).add(r.email.toLowerCase()))
-                                                }
+                                                onClick={() => setStep("template")}
+                                                className="mt-1 text-xs text-primary hover:underline"
                                             >
-                                                <X className="w-3 h-3" />
+                                                Change template
                                             </button>
-                                        </span>
-                                    ))}
-                                    {recipients.length > RECIPIENT_PREVIEW_LIMIT && (
-                                        <button
-                                            type="button"
-                                            className="text-xs text-primary hover:underline px-1"
-                                            onClick={() => setShowAllRecipients((v) => !v)}
-                                        >
-                                            {showAllRecipients
-                                                ? "Show fewer"
-                                                : `+${recipients.length - RECIPIENT_PREVIEW_LIMIT} more`}
-                                        </button>
-                                    )}
+                                        )}
+                                    </div>
                                 </div>
+                            ) : (
+                                <p className="text-sm text-muted-foreground">No template chosen yet.</p>
                             )}
                         </div>
-                    </section>
-
-                    {/* Step 3 — Custom placeholders */}
-                    {customPlaceholders.length > 0 && (
-                        <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
-                            <StepTitle n={3} icon={Braces} title="Fill in placeholders" />
-                            <p className="text-xs text-muted-foreground">
-                                These aren&apos;t filled in automatically. The same value is used for every recipient.
-                            </p>
-                            <div className="grid gap-3 sm:grid-cols-2">
-                                {customPlaceholders.map((key) => (
-                                    <div key={key} className="space-y-1.5">
-                                        <Label htmlFor={`var-${key}`} className="font-mono text-xs">
-                                            [{key}]
-                                        </Label>
-                                        <Input
-                                            id={`var-${key}`}
-                                            value={customVariables[key] ?? ""}
-                                            disabled={sending}
-                                            onChange={(e) =>
-                                                setCustomVariables((prev) => ({ ...prev, [key]: e.target.value }))
-                                            }
-                                        />
-                                    </div>
-                                ))}
-                            </div>
-                        </section>
-                    )}
+                        <div className="bg-card rounded-2xl border border-border shadow-card p-4 text-xs text-muted-foreground leading-relaxed">
+                            {mailConfigured ? (
+                                <>
+                                    Each person gets their own email via{" "}
+                                    <span className="font-medium text-foreground">
+                                        {PROVIDER_NAMES[mailConfig!.provider] ?? mailConfig!.provider}
+                                    </span>
+                                    , from {mailConfig!.fromName} &lt;{mailConfig!.fromEmail}&gt;, with [Name] and [Company] filled in.
+                                </>
+                            ) : (
+                                <>
+                                    No mail provider yet —{" "}
+                                    <Link href="/settings" className="text-primary hover:underline">
+                                        set one up in Settings → Mail
+                                    </Link>
+                                    .
+                                </>
+                            )}
+                        </div>
+                    </aside>
                 </div>
 
-                {/* ── Right: preview + send ────────────────────────────── */}
-                <div className="space-y-6 lg:sticky lg:top-6 self-start">
-                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
-                        <div className="flex items-center justify-between gap-3">
-                            <StepTitle n={customPlaceholders.length > 0 ? 4 : 3} icon={Eye} title="Preview" />
-                            {recipients.length > 1 && (
-                                <Select
-                                    value={previewRecipient?.email ?? ""}
-                                    onValueChange={setPreviewEmail}
-                                >
-                                    <SelectTrigger className="w-56 h-8 text-xs">
-                                        <SelectValue placeholder="Preview as…" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {recipients.slice(0, 100).map((r) => (
-                                            <SelectItem key={r.email} value={r.email} className="text-xs">
-                                                {r.name ? `${r.name} — ${r.email}` : r.email}
-                                            </SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            )}
-                        </div>
+                {/* ── Back / Continue ──────────────────────────────────── */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-card rounded-2xl border border-border shadow-card px-5 py-3.5">
+                    <Button
+                        type="button"
+                        variant="outline"
+                        onClick={() => goTo(activeIndex - 1)}
+                        disabled={activeIndex === 0 || sending || finished}
+                    >
+                        <ChevronLeft className="w-4 h-4" />
+                        Back
+                    </Button>
 
-                        {!preview ? (
-                            <p className="text-sm text-muted-foreground">Choose a template to see the email.</p>
-                        ) : (
-                            <div className="rounded-lg border border-border overflow-hidden">
-                                <div className="px-4 py-3 border-b border-border bg-muted/30 text-xs space-y-1">
-                                    <p>
-                                        <span className="text-muted-foreground w-14 inline-block">From</span>
-                                        {mailConfig?.fromName
-                                            ? `${mailConfig.fromName} <${mailConfig.fromEmail}>`
-                                            : "—"}
-                                    </p>
-                                    <p>
-                                        <span className="text-muted-foreground w-14 inline-block">To</span>
-                                        {preview.to}
-                                    </p>
-                                    <p className="font-medium text-sm pt-1">
-                                        <span
-                                            dangerouslySetInnerHTML={{ __html: highlightPlaceholders(preview.subject) }}
-                                        />
-                                    </p>
-                                </div>
-                                <div
-                                    className="prose prose-sm dark:prose-invert max-w-none text-foreground leading-relaxed p-4 max-h-[420px] overflow-y-auto"
-                                    dangerouslySetInnerHTML={{ __html: highlightPlaceholders(preview.html) }}
-                                />
-                            </div>
-                        )}
-                    </section>
-
-                    <section className="bg-card rounded-2xl border border-border shadow-card p-5 space-y-4">
-                        <StepTitle n={customPlaceholders.length > 0 ? 5 : 4} icon={Send} title="Send" />
-
-                        {mailConfigured ? (
-                            <p className="text-xs text-muted-foreground">
-                                Each recipient gets their own copy via{" "}
-                                <span className="font-medium text-foreground">
-                                    {PROVIDER_NAMES[mailConfig!.provider] ?? mailConfig!.provider}
+                    <div className="flex flex-wrap items-center justify-end gap-3">
+                        {activeId !== "review" ? (
+                            <>
+                                <span className="text-sm text-muted-foreground">
+                                    {currentProblem ?? (nextStep ? `Next: ${nextStep.title.toLowerCase()}` : "")}
                                 </span>
-                                , from {mailConfig!.fromName} &lt;{mailConfig!.fromEmail}&gt;.
-                            </p>
-                        ) : (
-                            <p className="text-xs text-muted-foreground">
-                                No mail provider yet —{" "}
-                                <Link href="/settings" className="text-primary hover:underline">
-                                    set one up in Settings → Mail
-                                </Link>
-                                .
-                            </p>
-                        )}
-
-                        {!sending && !finished && blockers.length > 0 && (
-                            <ul className="text-xs text-muted-foreground list-disc pl-4 space-y-0.5">
-                                {blockers.map((b) => (
-                                    <li key={b}>{b}</li>
-                                ))}
-                            </ul>
-                        )}
-
-                        {(sending || finished) && (
-                            <div className="space-y-3">
-                                <Progress value={total ? (done / total) * 100 : 0} />
-                                <div className="flex items-center gap-4 text-sm">
-                                    <span className="flex items-center gap-1.5 text-success">
-                                        <CheckCircle2 className="w-4 h-4" /> {sentCount} sent
-                                    </span>
-                                    <span className="flex items-center gap-1.5 text-destructive">
-                                        <AlertCircle className="w-4 h-4" /> {failedResults.length} failed
-                                    </span>
-                                    <span className="text-muted-foreground ml-auto">
-                                        {done} / {total}
-                                    </span>
-                                </div>
-                                {stoppedReason && <p className="text-xs text-destructive">{stoppedReason}</p>}
-                                {failedResults.length > 0 && (
-                                    <div className="max-h-40 overflow-y-auto rounded-md border border-destructive/20 bg-destructive/5 p-2 space-y-1">
-                                        {failedResults.map((r) => (
-                                            <p key={r.email} className="text-xs">
-                                                <span className="font-medium">{r.email}</span>{" "}
-                                                <span className="text-muted-foreground">— {r.error}</span>
-                                            </p>
-                                        ))}
-                                    </div>
-                                )}
-                            </div>
-                        )}
-
-                        <div className="flex items-center justify-end gap-2 pt-2 border-t border-border">
-                            {sending ? (
+                                <Button type="button" onClick={() => goTo(activeIndex + 1)} disabled={!!currentProblem}>
+                                    Continue
+                                    <ChevronRight className="w-4 h-4" />
+                                </Button>
+                            </>
+                        ) : sending ? (
+                            <>
+                                <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
+                                    <Loader2 className="w-4 h-4 animate-spin" />
+                                    Sending…
+                                </span>
                                 <Button type="button" variant="outline" onClick={() => (cancelRef.current = true)}>
                                     <Square className="w-4 h-4" />
                                     Stop
                                 </Button>
-                            ) : finished ? (
-                                <>
-                                    {failedResults.length > 0 && (
-                                        <Button type="button" variant="outline" onClick={retryFailed}>
-                                            <RotateCcw className="w-4 h-4" />
-                                            Retry failed
-                                        </Button>
-                                    )}
-                                    <Button type="button" variant="outline" asChild>
-                                        <Link href="/sent">View sent</Link>
+                            </>
+                        ) : finished ? (
+                            <>
+                                {failedResults.length > 0 && (
+                                    <Button type="button" variant="outline" onClick={retryFailed}>
+                                        <RotateCcw className="w-4 h-4" />
+                                        Retry failed
                                     </Button>
-                                    <Button type="button" onClick={resetForAnother}>
-                                        Done
-                                    </Button>
-                                </>
-                            ) : (
+                                )}
+                                <Button type="button" variant="outline" asChild>
+                                    <Link href="/sent">View sent</Link>
+                                </Button>
                                 <Button
                                     type="button"
-                                    disabled={blockers.length > 0}
-                                    onClick={() => setConfirmOpen(true)}
+                                    onClick={() => {
+                                        resetForAnother();
+                                        setStep("template");
+                                    }}
                                 >
-                                    <Send className="w-4 h-4" />
-                                    Send to {recipients.length} recipient{recipients.length === 1 ? "" : "s"}
+                                    Done
                                 </Button>
-                            )}
-                            {sending && (
-                                <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                                    <Loader2 className="w-4 h-4 animate-spin" />
-                                    Sending…
-                                </span>
-                            )}
-                        </div>
-                    </section>
+                            </>
+                        ) : (
+                            <Button type="button" disabled={blockers.length > 0} onClick={() => setConfirmOpen(true)}>
+                                <Send className="w-4 h-4" />
+                                Send to {recipients.length} recipient{recipients.length === 1 ? "" : "s"}
+                            </Button>
+                        )}
+                    </div>
                 </div>
             </motion.div>
 
@@ -976,15 +1190,12 @@ function BulkSendContent() {
 
 // ─── Local helpers ────────────────────────────────────────────────────────
 
-function StepTitle({ n, icon: Icon, title }: { n: number; icon: typeof FileText; title: string }) {
+function StepHeading({ title, description }: { title: string; description: string }) {
     return (
-        <h2 className="flex items-center gap-2.5 text-base font-semibold">
-            <span className="w-6 h-6 rounded-full bg-primary text-primary-foreground text-xs font-bold flex items-center justify-center">
-                {n}
-            </span>
-            <Icon className="w-4 h-4 text-muted-foreground" />
-            {title}
-        </h2>
+        <div>
+            <h2 className="text-lg font-semibold">{title}</h2>
+            <p className="mt-0.5 text-sm text-muted-foreground">{description}</p>
+        </div>
     );
 }
 

@@ -20,7 +20,7 @@ import {
     SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { apiErrorMessage } from "@/contexts/AuthContext";
+import { backend } from "@/lib/axios";
 
 interface Admin {
     id: string;
@@ -47,11 +47,10 @@ export function ShareContactsDialog({ open, onOpenChange, contactIds, onShared }
 
     useEffect(() => {
         let cancelled = false;
-        fetch("/api/users/admins")
-            .then(async (res) => {
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(apiErrorMessage(data, "Couldn't load admins"));
-                if (!cancelled) setAdmins(data.items ?? []);
+        backend
+            .get<{ items: Admin[] }>("/api/users/admins")
+            .then((res) => {
+                if (!cancelled) setAdmins(res.data.items ?? []);
             })
             .catch((err) => {
                 if (cancelled) return;
@@ -65,13 +64,7 @@ export function ShareContactsDialog({ open, onOpenChange, contactIds, onShared }
         if (!recipientId) return;
         setSharing(true);
         try {
-            const res = await fetch("/api/contacts/share", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ contactIds, recipientUserId: recipientId }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(apiErrorMessage(data, "Share failed"));
+            const { data } = await backend.post("/api/contacts/share", { contactIds, recipientUserId: recipientId });
             const parts = [`${data.copied} copied`];
             if (data.skipped) parts.push(`${data.skipped} already in their list`);
             if (data.notFound) parts.push(`${data.notFound} not found`);

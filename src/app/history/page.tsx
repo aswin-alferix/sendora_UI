@@ -8,6 +8,7 @@ import { StatusBadge, type StatusTone } from "@/components/shared/StatusBadge";
 import { DataTable, type DataTableColumn } from "@/components/shared/data-table/DataTable";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { backend } from "@/lib/axios";
 
 type ActivityType = "sent" | "scheduled" | "failed";
 
@@ -48,8 +49,7 @@ export default function HistoryPage() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/emails");
-                const data = await res.json();
+                const { data } = await backend.get("/api/emails");
                 if (cancelled) return;
                 const mapped: ActivityItem[] = (data.items ?? []).map(
                     (e: { id: string; status: string; to: string[]; sentAt?: string; scheduledAt?: string; createdAt: string }) => {

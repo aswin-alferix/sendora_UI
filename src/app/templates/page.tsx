@@ -34,6 +34,7 @@ import { CreateTemplateDialog } from "@/components/templates/CreateTemplateDialo
 import { useToast } from "@/hooks/use-toast";
 import type { UploadedFile } from "@/lib/files";
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
+import { backend } from "@/lib/axios";
 
 // Wrap [Anything] in chip spans so the preview matches the editor's chip styling
 function highlightPlaceholders(html: string): string {
@@ -114,8 +115,7 @@ export default function TemplatesPage() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/templates");
-                const data = await res.json();
+                const { data } = await backend.get("/api/templates");
                 if (cancelled) return;
                 const items: Template[] = (data.items ?? []).map((t: { id: string; name: string; subject: string; description: string; body?: string; attachments?: UploadedFile[]; updatedAt: string; }) => ({
                     id: t.id,
@@ -163,13 +163,7 @@ export default function TemplatesPage() {
     }) => {
         try {
             if (templateData.id) {
-                const res = await fetch(`/api/templates/${templateData.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(templateData),
-                });
-                if (!res.ok) throw new Error("Update failed");
-                const updated = await res.json();
+                const { data: updated } = await backend.patch(`/api/templates/${templateData.id}`, templateData);
                 setTemplates((prev) =>
                     prev.map((t) => (t.id === templateData.id ? { ...t, ...updated, updatedAt: relativeTime(updated.updatedAt), updatedIso: updated.updatedAt } : t))
                 );
@@ -179,13 +173,7 @@ export default function TemplatesPage() {
                     variant: "success",
                 });
             } else {
-                const res = await fetch("/api/templates", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(templateData),
-                });
-                if (!res.ok) throw new Error("Create failed");
-                const created = await res.json();
+                const { data: created } = await backend.post("/api/templates", templateData);
                 setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt), updatedIso: created.updatedAt }, ...prev]);
                 toast({
                     title: "Template Created",
@@ -207,8 +195,7 @@ export default function TemplatesPage() {
     const handleConfirmDelete = async () => {
         if (templateToDelete) {
             try {
-                const res = await fetch(`/api/templates/${templateToDelete.id}`, { method: "DELETE" });
-                if (!res.ok) throw new Error("Delete failed");
+                await backend.delete(`/api/templates/${templateToDelete.id}`);
                 setTemplates((prev) => prev.filter((t) => t.id !== templateToDelete.id));
                 toast({
                     title: "Template Deleted",
@@ -226,19 +213,13 @@ export default function TemplatesPage() {
     const handleDuplicateTemplate = async (template: Template) => {
         const newName = nextCopyName(template.name, templates.map((t) => t.name));
         try {
-            const res = await fetch("/api/templates", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    name: newName,
-                    subject: template.subject,
-                    description: template.description,
-                    body: template.body ?? "",
-                    attachmentIds: (template.attachments ?? []).map((a) => a.id),
-                }),
+            const { data: created } = await backend.post("/api/templates", {
+                name: newName,
+                subject: template.subject,
+                description: template.description,
+                body: template.body ?? "",
+                attachmentIds: (template.attachments ?? []).map((a) => a.id),
             });
-            if (!res.ok) throw new Error("Duplicate failed");
-            const created = await res.json();
             setTemplates((prev) => [{ ...created, updatedAt: relativeTime(created.updatedAt), updatedIso: created.updatedAt }, ...prev]);
             toast({
                 title: "Template Duplicated",

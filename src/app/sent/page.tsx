@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { backend } from "@/lib/axios";
 
 type SentStatus = "sent" | "pending" | "failed";
 
@@ -61,8 +62,7 @@ export default function SentPage() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/emails");
-                const data = await res.json();
+                const { data } = await backend.get("/api/emails");
                 if (cancelled) return;
                 const items: SentEmail[] = (data.items ?? []).map(
                     (e: { id: string; to: string[]; subject: string; status: string; createdAt: string; sentAt?: string; scheduledAt?: string }) => {

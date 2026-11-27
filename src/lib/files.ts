@@ -1,4 +1,4 @@
-import { apiErrorMessage } from "@/contexts/AuthContext";
+import { backend } from "@/lib/axios";
 
 /** A file stored on the API (POST /api/files). `url` is /api/files/<id>. */
 export interface UploadedFile {
@@ -17,10 +17,8 @@ export function formatBytes(bytes: number): string {
 export async function uploadFile(file: Blob, filename: string): Promise<UploadedFile> {
     const form = new FormData();
     form.append("file", file, filename);
-    const res = await fetch("/api/files", { method: "POST", body: form });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(apiErrorMessage(data, `Upload failed (HTTP ${res.status})`));
-    return data as UploadedFile;
+    const { data } = await backend.post<UploadedFile>("/api/files", form);
+    return data;
 }
 
 export async function dataUrlToBlob(dataUrl: string): Promise<Blob> {

@@ -1,14 +1,19 @@
 "use client";
 
 import { createContext, useContext, useEffect, useState, useCallback } from "react";
+import axios from "axios";
+import { apiErrorMessage, authClient, refreshSession } from "@/lib/axios";
+
+export { apiErrorMessage };
 
 /**
- * Real sign-in against the NestJS API (sendors_API), proxied through /api.
+ * Real sign-in against the NestJS API (sendors_API), called directly at
+ * NEXT_PUBLIC_BACKEND_URL with axios (src/lib/axios.ts).
  *
  * The API keeps the session in httpOnly cookies (sendora_at = 15-minute access
  * token, sendora_rt = refresh token), so nothing secret is stored in the
  * browser. A JS-readable `sendora_session` hint lets proxy.ts know a session
- * exists. When any /api call comes back 401, we refresh once and retry.
+ * exists. When an API call comes back 401, the axios client refreshes once and retries.
  */
 
 export interface AuthUser {
@@ -50,51 +55,6 @@ function toAuthUser(u: ApiUser): AuthUser {
     return { ...u, firstName: first, lastName: rest.join(" ") };
 }
 
-/** Readable message from the API's { statusCode, error, message } shape. */
-export function apiErrorMessage(data: unknown, fallback: string): string {
-    const d = (data ?? {}) as { message?: unknown; error?: unknown };
-    if (Array.isArray(d.message) && d.message.length) return d.message.join(". ");
-    if (typeof d.message === "string" && d.message) return d.message;
-    if (typeof d.error === "string" && d.error) return d.error;
-    return fallback;
-}
-
-// ─── Session refresh shared by the context and the fetch wrapper ──────────
-
-let refreshInFlight: Promise<ApiUser | null> | null = null;
-let nativeFetch: typeof fetch | null = null;
-
-function rawFetch(input: RequestInfo | URL, init?: RequestInit) {
-    return (nativeFetch ?? fetch)(input, init);
-}
-
-/** One refresh at a time, however many requests hit 401 together. */
-function refreshSession(): Promise<ApiUser | null> {
-    if (!refreshInFlight) {
-        refreshInFlight = rawFetch("/api/auth/refresh", { method: "POST", credentials: "same-origin" })
-            .then(async (res) => (res.ok ? ((await res.json()) as { user: ApiUser }).user : null))
-            .catch(() => null)
-            .finally(() => {
-                refreshInFlight = null;
-            });
-    }
-    return refreshInFlight;
-}
-
-function isApiCall(input: RequestInfo | URL): boolean {
-    const url =
-        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
-    try {
-        const u = new URL(url, window.location.origin);
-        return (
-            u.origin === window.location.origin &&
-            u.pathname.startsWith("/api/") &&
-            !u.pathname.startsWith("/api/auth/")
-        );
-    } catch {
-        return false;
-    }
-}
 
 /** True when the URL holds a Microsoft sign-in response (#code=… or #error=…). */
 export function hasMsalResponse(): boolean {
@@ -117,41 +77,14 @@ async function loadMsal() {
 /** Current user from the API, refreshing once if the access token has expired. */
 async function fetchSessionUser(): Promise<ApiUser | null> {
     try {
-        const res = await rawFetch("/api/auth/me", { credentials: "same-origin" });
-        if (res.ok) return ((await res.json()) as { user: ApiUser }).user;
-        if (res.status === 401) return await refreshSession();
-        return null;
-    } catch {
+        const res = await authClient.get<{ user: ApiUser }>("/api/auth/me");
+        return res.data.user;
+    } catch (err) {
+        if (axios.isAxiosError(err) && err.response?.status === 401) {
+            return (await refreshSession()) as unknown as ApiUser | null;
+        }
         return null;
     }
-}
-
-function goToLogin() {
-    const { pathname, search } = window.location;
-    if (pathname.startsWith("/login")) return;
-    window.location.assign(`/login?from=${encodeURIComponent(pathname + search)}`);
-}
-
-/**
- * Wrap window.fetch once: a 401 from our API triggers one refresh + retry,
- * so the pages' plain fetch("/api/...") calls keep working past the
- * 15-minute access-token lifetime. If refresh fails, go to the login page.
- */
-function installFetchWrapper() {
-    if (typeof window === "undefined" || nativeFetch) return;
-    nativeFetch = window.fetch.bind(window);
-    window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-        const res = await nativeFetch!(input, init);
-        if (res.status !== 401 || !isApiCall(input)) return res;
-        // A Request object's body can only be read once; only retry plain url+init calls.
-        if (typeof input !== "string" && !(input instanceof URL)) return res;
-        const user = await refreshSession();
-        if (!user) {
-            goToLogin();
-            return res;
-        }
-        return nativeFetch!(input, init);
-    };
 }
 
 // ─── Provider ─────────────────────────────────────────────────────────────
@@ -169,7 +102,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     // Check the session on load (cookies are httpOnly, so ask the API).
     useEffect(() => {
-        installFetchWrapper();
         let cancelled = false;
         fetchSessionUser().then((u) => {
             if (cancelled) return;
@@ -182,19 +114,15 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }, []);
 
     const authPost = useCallback(async (path: string, body: unknown, fallback: string) => {
-        const res = await rawFetch(path, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            credentials: "same-origin",
-            body: JSON.stringify(body),
-        });
-        const data = await res.json().catch(() => ({}));
-        if (!res.ok) {
-            if (res.status === 429) throw new Error("Too many attempts. Wait a minute and try again.");
-            if (res.status >= 500) throw new Error("Sendora's server isn't responding. Is the API running?");
-            throw new Error(apiErrorMessage(data, fallback));
+        try {
+            const res = await authClient.post<{ user: ApiUser }>(path, body);
+            setUser(toAuthUser(res.data.user));
+        } catch (err) {
+            const status = axios.isAxiosError(err) ? err.response?.status : undefined;
+            if (status === 429) throw new Error("Too many attempts. Wait a minute and try again.");
+            if (status === undefined || status >= 500) throw new Error("Sendora's server isn't responding. Is the API running?");
+            throw new Error(apiErrorMessage(axios.isAxiosError(err) ? err.response?.data : undefined, fallback));
         }
-        setUser(toAuthUser((data as { user: ApiUser }).user));
     }, []);
 
     const loginWithPassword = useCallback(
@@ -232,7 +160,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const logout = useCallback(async () => {
         try {
-            await rawFetch("/api/auth/logout", { method: "POST", credentials: "same-origin" });
+            await authClient.post("/api/auth/logout");
         } catch {
             /* cookies are cleared server-side; nothing else to do */
         }

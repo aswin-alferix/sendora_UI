@@ -3,7 +3,7 @@
 import { useState, useMemo, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { motion, AnimatePresence } from "framer-motion";
-import { Plus, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, X, Settings2, Share2 } from "lucide-react";
+import { Plus, Users, MoreVertical, Mail, Edit2, Trash2, Building2, UserCircle, Send, Tags, Minus, Check, Download, Upload, X, Settings2, Share2, FileSpreadsheet } from "lucide-react";
 
 import { PageHeader } from "@/components/shared/PageHeader";
 import { PlayOnceImage } from "@/components/shared/PlayOnceImage";
@@ -50,8 +50,8 @@ import { RolesManagementDialog } from "@/components/contacts/RolesManagementDial
 import { BulkGroupsManagementDialog } from "@/components/contacts/BulkGroupsManagementDialog";
 import { ContactDetailDrawer } from "@/components/contacts/ContactDetailDrawer";
 import { ShareContactsDialog } from "@/components/contacts/ShareContactsDialog";
-import { apiErrorMessage } from "@/contexts/AuthContext";
 import { useToast } from "@/hooks/use-toast";
+import { backend } from "@/lib/axios";
 
 interface ContactRole {
     id: string;
@@ -127,8 +127,7 @@ export default function ContactsPage() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/contacts");
-                const data = await res.json();
+                const { data } = await backend.get("/api/contacts");
                 if (cancelled) return;
                 const items: Contact[] = (data.items ?? []).map((c: Contact) => ({
                     id: c.id,
@@ -203,11 +202,13 @@ export default function ContactsPage() {
 
     const handleExport = async (format: "xlsx" | "csv") => {
         try {
-            const res = await fetch(`/api/contacts/export?format=${format}`);
-            if (!res.ok) throw new Error(apiErrorMessage(await res.json().catch(() => ({})), "Export failed"));
-            const blob = await res.blob();
-            const disposition = res.headers.get("Content-Disposition") ?? "";
-            const filename = /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? `contacts.${format}`;
+            const res = await backend.get<Blob>("/api/contacts/export", { params: { format }, responseType: "blob" });
+            const blob = res.data;
+            // Cross-origin responses hide Content-Disposition unless the API exposes it, so build the name here.
+            const disposition = String(res.headers["content-disposition"] ?? "");
+            const filename =
+                /filename="?([^";]+)"?/.exec(disposition)?.[1] ??
+                `sendora-contacts-${new Date().toISOString().slice(0, 10)}.${format}`;
             const url = URL.createObjectURL(blob);
             const a = document.createElement("a");
             a.href = url;
@@ -220,6 +221,24 @@ export default function ContactsPage() {
         }
     };
 
+    // A blank file with the right headers, example rows and (Excel) a Role dropdown of your roles.
+    const handleDownloadTemplate = async (format: "xlsx" | "csv") => {
+        try {
+            const res = await backend.get<Blob>("/api/contacts/import-template", {
+                params: { format, roles: roleOptions.join(",") },
+                responseType: "blob",
+            });
+            const url = URL.createObjectURL(res.data);
+            const a = document.createElement("a");
+            a.href = url;
+            a.download = `sendora-contacts-import-template.${format}`;
+            a.click();
+            URL.revokeObjectURL(url);
+        } catch (err) {
+            toast({ title: "Couldn't download the template", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+        }
+    };
+
     // Import runs on the server (CSV or Excel). Existing emails are skipped, not overwritten.
     const handleImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
@@ -229,9 +248,7 @@ export default function ContactsPage() {
         try {
             const form = new FormData();
             form.append("file", file);
-            const res = await fetch("/api/contacts/import?mode=skip", { method: "POST", body: form });
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(apiErrorMessage(data, "Could not import the file."));
+            const { data } = await backend.post("/api/contacts/import", form, { params: { mode: "skip" } });
             const invalid: { row: number; reason: string }[] = data.invalid ?? [];
             const parts = [`${data.created} added`];
             if (data.skipped) parts.push(`${data.skipped} already existed`);
@@ -363,8 +380,7 @@ export default function ContactsPage() {
     const handleConfirmDelete = async () => {
         if (contactToDelete) {
             try {
-                const res = await fetch(`/api/contacts/${contactToDelete.id}`, { method: "DELETE" });
-                if (!res.ok) throw new Error("Delete failed");
+                await backend.delete(`/api/contacts/${contactToDelete.id}`);
                 setContacts((prev) => prev.filter((c) => c.id !== contactToDelete.id));
                 setSelectedContacts((prev) => {
                     const next = new Set(prev);
@@ -393,7 +409,7 @@ export default function ContactsPage() {
     const handleConfirmBulkDelete = async () => {
         try {
             await Promise.all(
-                Array.from(selectedContacts).map((id) => fetch(`/api/contacts/${id}`, { method: "DELETE" }))
+                Array.from(selectedContacts).map((id) => backend.delete(`/api/contacts/${id}`))
             );
             setContacts((prev) => prev.filter((c) => !selectedContacts.has(c.id)));
             toast({
@@ -485,23 +501,11 @@ export default function ContactsPage() {
     }) => {
         try {
             if (contactData.id) {
-                const res = await fetch(`/api/contacts/${contactData.id}`, {
-                    method: "PATCH",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(contactData),
-                });
-                if (!res.ok) throw new Error("Update failed");
-                const updated = await res.json();
+                const { data: updated } = await backend.patch(`/api/contacts/${contactData.id}`, contactData);
                 setContacts((prev) => prev.map((c) => (c.id === contactData.id ? { ...c, ...updated } : c)));
                 toast({ title: "Contact updated", description: "The contact has been updated successfully.", variant: "success" });
             } else {
-                const res = await fetch("/api/contacts", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(contactData),
-                });
-                if (!res.ok) throw new Error("Create failed");
-                const created = await res.json();
+                const { data: created } = await backend.post("/api/contacts", contactData);
                 setContacts((prev) => [created, ...prev]);
                 toast({ title: "Contact added", description: "The new contact has been added successfully.", variant: "success" });
             }
@@ -514,14 +518,9 @@ export default function ContactsPage() {
     const handleAddContacts = async (list: NewContact[]): Promise<AddContactsResult> => {
         const results = await Promise.allSettled(
             list.map(async (c) => {
-                const res = await fetch("/api/contacts", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(c),
-                });
-                const data = await res.json().catch(() => ({}));
-                if (!res.ok) throw new Error(apiErrorMessage(data, "Couldn't save this contact"));
-                return data as Contact;
+                // The axios client puts the API's own error message on err.message.
+                const { data } = await backend.post<Contact>("/api/contacts", c);
+                return data;
             })
         );
         const created: Contact[] = [];
@@ -878,6 +877,14 @@ export default function ContactsPage() {
                                             <DropdownMenuItem disabled={importing} onClick={() => importInputRef.current?.click()}>
                                                 <Upload className="w-4 h-4 mr-2" />
                                                 {importing ? "Importing…" : "Import CSV / Excel"}
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleDownloadTemplate("xlsx")}>
+                                                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                                                Import template (Excel)
+                                            </DropdownMenuItem>
+                                            <DropdownMenuItem onClick={() => handleDownloadTemplate("csv")}>
+                                                <FileSpreadsheet className="w-4 h-4 mr-2" />
+                                                Import template (CSV)
                                             </DropdownMenuItem>
                                         </DropdownMenuContent>
                                     </DropdownMenu>

@@ -1,8 +1,11 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { ImagePlus, Loader2, Sparkles, Upload, Wand2, X } from "lucide-react";
+import axios from "axios";
+import { backend } from "@/lib/axios";
+import { ImagePlus, Loader2, Maximize2, Sparkles, Upload, Wand2, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
@@ -49,15 +52,16 @@ export function AiImagePanel({ onInsert }: AiImagePanelProps) {
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [result, setResult] = useState<UploadedFile | null>(null);
+    const [previewOpen, setPreviewOpen] = useState(false);
     const fileRef = useRef<HTMLInputElement>(null);
 
     // Only ask the server once the user opts in.
     useEffect(() => {
         if (!enabled || aiAvailable !== null) return;
         let cancelled = false;
-        fetch("/api/ai/images/status")
-            .then((r) => r.json())
-            .then((d) => { if (!cancelled) setAiAvailable(!!d.enabled); })
+        backend
+            .get<{ enabled: boolean }>("/api/ai/images/status")
+            .then((res) => { if (!cancelled) setAiAvailable(!!res.data.enabled); })
             .catch(() => { if (!cancelled) setAiAvailable(false); });
         return () => { cancelled = true; };
     }, [enabled, aiAvailable]);
@@ -93,25 +97,26 @@ export function AiImagePanel({ onInsert }: AiImagePanelProps) {
         setError(null);
         setResult(null);
         try {
-            let res: Response;
             if (mode === "generate") {
-                res = await fetch("/api/ai/images/generate", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ prompt: prompt.trim(), size }),
+                const res = await backend.post<UploadedFile>("/api/ai/images/generate", {
+                    prompt: prompt.trim(),
+                    size,
                 });
+                setResult(res.data);
             } else {
                 const form = new FormData();
                 form.append("image", source!, source!.name);
                 form.append("prompt", prompt.trim());
                 form.append("size", size);
-                res = await fetch("/api/ai/images/edit", { method: "POST", body: form });
+                const res = await backend.post<UploadedFile>("/api/ai/images/edit", form);
+                setResult(res.data);
             }
-            const data = await res.json().catch(() => ({}));
-            if (!res.ok) throw new Error(apiErrorMessage(data, `Image generation failed (HTTP ${res.status})`));
-            setResult(data as UploadedFile);
         } catch (err) {
-            setError(err instanceof Error ? err.message : String(err));
+            if (axios.isAxiosError(err)) {
+                setError(apiErrorMessage(err.response?.data, `Image generation failed (${err.response?.status ?? err.message})`));
+            } else {
+                setError(err instanceof Error ? err.message : String(err));
+            }
         } finally {
             setBusy(false);
         }
@@ -222,8 +227,19 @@ export function AiImagePanel({ onInsert }: AiImagePanelProps) {
 
                         {result && (
                             <div className="flex sm:flex-col items-center gap-2">
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img src={result.url} alt="Generated" className="h-24 w-24 object-cover rounded border bg-background" />
+                                <button
+                                    type="button"
+                                    onClick={() => setPreviewOpen(true)}
+                                    className="group relative rounded border bg-background overflow-hidden focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                                    aria-label="Preview generated image"
+                                    title="Click to preview"
+                                >
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img src={result.url} alt="Generated" className="h-24 w-24 object-cover" />
+                                    <span className="absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 group-hover:opacity-100 transition-opacity">
+                                        <Maximize2 className="w-5 h-5 text-white" />
+                                    </span>
+                                </button>
                                 <Button type="button" size="sm" variant="secondary" className="h-7 text-xs" onClick={() => onInsert(result)}>
                                     Insert into body
                                 </Button>
@@ -231,6 +247,33 @@ export function AiImagePanel({ onInsert }: AiImagePanelProps) {
                         )}
                     </div>
                 </div>
+            )}
+
+            {result && (
+                <Dialog open={previewOpen} onOpenChange={setPreviewOpen}>
+                    <DialogContent className="sm:max-w-3xl">
+                        <DialogHeader>
+                            <DialogTitle>Image preview</DialogTitle>
+                            <DialogDescription className="truncate">{result.filename}</DialogDescription>
+                        </DialogHeader>
+                        <div className="flex items-center justify-center rounded-md border bg-muted/30 p-2">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={result.url} alt="Generated preview" className="max-h-[65vh] w-auto object-contain rounded" />
+                        </div>
+                        <DialogFooter>
+                            <Button type="button" variant="outline" onClick={() => setPreviewOpen(false)}>Close</Button>
+                            <Button
+                                type="button"
+                                onClick={() => {
+                                    onInsert(result);
+                                    setPreviewOpen(false);
+                                }}
+                            >
+                                Insert into body
+                            </Button>
+                        </DialogFooter>
+                    </DialogContent>
+                </Dialog>
             )}
         </div>
     );

@@ -29,6 +29,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { apiErrorMessage } from "@/contexts/AuthContext";
+import { anyStatus, backend } from "@/lib/axios";
 
 // ─── Types ────────────────────────────────────────────────────────────────
 
@@ -179,10 +180,9 @@ export function MailProviderConfig() {
         setTesting(true);
         setTestResult(null);
         try {
-            const res = await fetch("/api/mail/test", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
+            const res = await backend.post(
+                "/api/mail/test",
+                {
                     provider: config.provider,
                     apiKey:
                         config.provider === "resend"
@@ -193,10 +193,11 @@ export function MailProviderConfig() {
                     awsAccessKeyId: config.sesAccessKeyId,
                     awsSecretAccessKey: config.sesSecretAccessKey,
                     awsRegion: config.sesRegion,
-                }),
-            });
-            const data = await res.json().catch(() => ({}));
-            if (res.ok) {
+                },
+                anyStatus
+            );
+            const data = res.data;
+            if (res.status >= 200 && res.status < 300) {
                 setTestResult({ ok: true });
             } else {
                 setTestResult({

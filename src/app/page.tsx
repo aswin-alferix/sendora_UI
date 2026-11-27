@@ -16,6 +16,7 @@ import { EmailRow } from "@/components/shared/EmailRow";
 import { PlayOnceImage } from "@/components/shared/PlayOnceImage";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { backend } from "@/lib/axios";
 
 interface ApiEmail {
     id: string;
@@ -80,8 +81,7 @@ export default function Dashboard() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/emails?limit=500");
-                const data = await res.json();
+                const { data } = await backend.get("/api/emails?limit=500");
                 if (!cancelled) setEmails(data.items ?? []);
             } catch (err) {
                 console.error("Failed to load emails", err);

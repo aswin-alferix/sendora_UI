@@ -16,6 +16,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/comp
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { RichTextEditor, type Attachment } from "@/components/email/RichTextEditor";
+import { TemplatePicker, type ComposeTemplate } from "@/components/email/TemplatePicker";
 import { SchedulePicker } from "@/components/email/SchedulePicker";
 import { RecipientInput, useHydrated, isRecipientDrag, readRecipientDrag, type RecipientContact } from "@/components/email/RecipientInput";
 import { MAIL_CONFIG_STORAGE_KEY, type MailConfigState } from "@/components/settings/MailProviderConfig";
@@ -23,6 +24,7 @@ import { AUTO_PLACEHOLDER_KEYS, extractPlaceholders } from "@/lib/mail/substitut
 import { apiErrorMessage } from "@/contexts/AuthContext";
 import { formatBytes, type UploadedFile } from "@/lib/files";
 import { isValidEmail } from "@/lib/email";
+import { anyStatus, backend } from "@/lib/axios";
 
 /** The chips already explain bad addresses, so this message is not shown again under the field. */
 const INVALID_ADDRESSES_MSG = "Fix or remove the invalid addresses";
@@ -151,9 +153,9 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
     const [contacts, setContacts] = useState<RecipientContact[]>([]);
     useEffect(() => {
         let cancelled = false;
-        fetch("/api/contacts")
-            .then((r) => (r.ok ? r.json() : { items: [] }))
-            .then((data: { items?: { name?: string; email?: string }[] }) => {
+        backend
+            .get<{ items?: { name?: string; email?: string }[] }>("/api/contacts")
+            .then(({ data }) => {
                 if (cancelled) return;
                 setContacts(
                     (data.items ?? [])
@@ -294,12 +296,8 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
         }
 
         try {
-            const res = await fetch("/api/send", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-            });
-            const result = await res.json().catch(() => ({}));
+            const res = await backend.post("/api/send", payload, anyStatus);
+            const result = res.data ?? {};
 
             // Multi-status (207) means partial success in send-separately mode
             if (res.status === 207) {
@@ -319,7 +317,7 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                 return;
             }
 
-            if (!res.ok) {
+            if (res.status < 200 || res.status >= 300) {
                 toast({
                     title: "Send failed",
                     description: apiErrorMessage(result, `Provider returned HTTP ${res.status}`),
@@ -431,15 +429,41 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/signatures");
-                if (!res.ok) return;
-                const data = await res.json();
+                const { data } = await backend.get("/api/signatures");
                 const def = (data.items ?? []).find((s: { isDefault?: boolean }) => s.isDefault);
                 if (!cancelled && def) setDefaultSig({ id: def.id, name: def.name });
             } catch { /* ignore */ }
         })();
         return () => { cancelled = true; };
     }, []);
+    // Fill subject, body and attachments from a saved template (recipients are kept).
+    const handleApplyTemplate = useCallback(
+        (t: ComposeTemplate) => {
+            setValue("subject", t.subject, { shouldDirty: true, shouldValidate: true });
+            setValue("body", t.body, { shouldDirty: true, shouldValidate: true });
+            setAttachments(
+                t.attachments.map((a) => ({
+                    id: a.id,
+                    name: a.filename,
+                    size: formatBytes(a.size),
+                    type: a.contentType,
+                    isImage: a.contentType.startsWith("image/"),
+                    preview: a.contentType.startsWith("image/") ? a.url : undefined,
+                }))
+            );
+            setEditorKey((k) => k + 1);
+            toast({ title: "Template applied", description: `"${t.name}" is in your message. Edit it as you like before sending.` });
+        },
+        [setValue, toast]
+    );
+    const handleClearTemplate = useCallback(() => {
+        setValue("subject", "", { shouldDirty: true });
+        setValue("body", "", { shouldDirty: true });
+        setAttachments([]);
+        setEditorKey((k) => k + 1);
+    }, [setValue]);
+    const hasMessageContent = subjectValue.trim().length > 0 || bodyValue.replace(/<[^>]*>/g, "").trim().length > 0 || /<img\b/i.test(bodyValue);
+
     const hasSignaturePlaceholder = useMemo(
         () => /\[\s*Signature\s*\]/i.test(bodyValue),
         [bodyValue]
@@ -468,6 +492,8 @@ export function ComposeForm({ onSend, initialTo = "", initialSubject, initialBod
                     )}
                 </div>
                 <div className="flex items-center gap-3">
+                    <TemplatePicker hasContent={hydrated && hasMessageContent} onApply={handleApplyTemplate} onClear={handleClearTemplate} />
+                    <span className="h-5 w-px bg-border" aria-hidden="true" />
                     <div className="flex items-center gap-2">
                         <Switch
                             id="send-separately"

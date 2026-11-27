@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { RichTextEditor } from "@/components/email/RichTextEditor";
 import { useToast } from "@/hooks/use-toast";
+import { backend } from "@/lib/axios";
 
 interface Signature {
     id: string;
@@ -76,8 +77,7 @@ export function SignatureManager() {
         let cancelled = false;
         (async () => {
             try {
-                const res = await fetch("/api/signatures");
-                const data = await res.json();
+                const { data } = await backend.get<{ items: Signature[] }>("/api/signatures");
                 if (!cancelled) setSignatures(data.items ?? []);
             } catch (err) {
                 console.error("Failed to load signatures", err);
@@ -107,13 +107,7 @@ export function SignatureManager() {
             return;
         }
         try {
-            const res = await fetch(`/api/signatures/${editingId}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ name, content: draftContent }),
-            });
-            if (!res.ok) throw new Error("Save failed");
-            const updated = await res.json();
+            const { data: updated } = await backend.patch<Signature>(`/api/signatures/${editingId}`, { name, content: draftContent });
             setSignatures((prev) => prev.map((s) => (s.id === editingId ? updated : s)));
             toast({ title: "Signature saved", description: `"${name}" has been saved.`, variant: "success" });
             cancelEdit();
@@ -126,16 +120,10 @@ export function SignatureManager() {
         if (isCreating) return;
         setIsCreating(true);
         try {
-            const res = await fetch("/api/signatures", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    name: template?.name ?? `New signature ${signatures.length + 1}`,
-                    content: template?.html ?? "",
-                }),
+            const { data: created } = await backend.post<Signature>("/api/signatures", {
+                name: template?.name ?? `New signature ${signatures.length + 1}`,
+                content: template?.html ?? "",
             });
-            if (!res.ok) throw new Error("Create failed");
-            const created: Signature = await res.json();
             setSignatures((prev) => [...prev, created]);
             startEdit(created);
         } catch (err) {
@@ -148,8 +136,7 @@ export function SignatureManager() {
     const handleDelete = async (id: string) => {
         const sig = signatures.find((s) => s.id === id);
         try {
-            const res = await fetch(`/api/signatures/${id}`, { method: "DELETE" });
-            if (!res.ok) throw new Error("Delete failed");
+            await backend.delete(`/api/signatures/${id}`);
             setSignatures((prev) => {
                 const filtered = prev.filter((s) => s.id !== id);
                 // If we deleted the default, the API promotes the oldest. Mirror that locally.
@@ -172,12 +159,7 @@ export function SignatureManager() {
 
     const handleSetDefault = async (id: string) => {
         try {
-            const res = await fetch(`/api/signatures/${id}`, {
-                method: "PATCH",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ isDefault: true }),
-            });
-            if (!res.ok) throw new Error("Update failed");
+            await backend.patch(`/api/signatures/${id}`, { isDefault: true });
             setSignatures((prev) => prev.map((s) => ({ ...s, isDefault: s.id === id })));
             const sig = signatures.find((s) => s.id === id);
             if (sig) {
